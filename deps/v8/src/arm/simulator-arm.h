@@ -444,7 +444,7 @@ class Simulator {
   };
   StopCountAndDesc watched_stops_[kNumOfWatchedStops];
 
-  // Synchronization primitives. See ARM DDI 0406C.b, A2.9.
+  // Syncronization primitives. See ARM DDI 0406C.b, A2.9.
   enum class MonitorAccess {
     Open,
     Exclusive,

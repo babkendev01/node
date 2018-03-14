@@ -30,6 +30,7 @@ Object* VisitWeakList(Heap* heap, Object* list, WeakObjectRetainer* retainer) {
   Object* undefined = heap->undefined_value();
   Object* head = undefined;
   T* tail = NULL;
+  MarkCompactCollector* collector = heap->mark_compact_collector();
   bool record_slots = MustRecordSlots(heap);
 
   while (list != undefined) {
@@ -48,7 +49,7 @@ Object* VisitWeakList(Heap* heap, Object* list, WeakObjectRetainer* retainer) {
         if (record_slots) {
           Object** next_slot =
               HeapObject::RawField(tail, WeakListVisitor<T>::WeakNextOffset());
-          MarkCompactCollector::RecordSlot(tail, next_slot, retained);
+          collector->RecordSlot(tail, next_slot, retained);
         }
       }
       // Retained object is new tail.
@@ -140,10 +141,11 @@ struct WeakListVisitor<Context> {
 
     if (heap->gc_state() == Heap::MARK_COMPACT) {
       // Record the slots of the weak entries in the native context.
+      MarkCompactCollector* collector = heap->mark_compact_collector();
       for (int idx = Context::FIRST_WEAK_SLOT;
            idx < Context::NATIVE_CONTEXT_SLOTS; ++idx) {
         Object** slot = Context::cast(context)->RawFieldOfElementAt(idx);
-        MarkCompactCollector::RecordSlot(context, slot, *slot);
+        collector->RecordSlot(context, slot, *slot);
       }
       // Code objects are always allocated in Code space, we do not have to
       // visit

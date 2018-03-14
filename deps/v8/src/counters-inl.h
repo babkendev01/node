@@ -7,6 +7,8 @@
 
 #include "src/counters.h"
 
+#include "src/isolate.h"
+
 namespace v8 {
 namespace internal {
 
@@ -62,8 +64,23 @@ base::TimeTicks RuntimeCallTimer::Now() {
 }
 
 RuntimeCallTimerScope::RuntimeCallTimerScope(
-    HeapObject* heap_object, RuntimeCallStats::CounterId counter_id)
-    : RuntimeCallTimerScope(heap_object->GetIsolate(), counter_id) {}
+    Isolate* isolate, RuntimeCallStats::CounterId counter_id) {
+  if (V8_UNLIKELY(FLAG_runtime_stats)) {
+    Initialize(isolate->counters()->runtime_call_stats(), counter_id);
+  }
+}
+
+RuntimeCallTimerScope::RuntimeCallTimerScope(
+    HeapObject* heap_object, RuntimeCallStats::CounterId counter_id) {
+  RuntimeCallTimerScope(heap_object->GetIsolate(), counter_id);
+}
+
+RuntimeCallTimerScope::RuntimeCallTimerScope(
+    RuntimeCallStats* stats, RuntimeCallStats::CounterId counter_id) {
+  if (V8_UNLIKELY(FLAG_runtime_stats)) {
+    Initialize(stats, counter_id);
+  }
+}
 
 }  // namespace internal
 }  // namespace v8

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// Flags: --no-stress-fullcodegen
 // The functions used for testing backtraces. They are at the top to make the
 // testing of source line/column easier.
 
@@ -275,13 +276,14 @@ function *gen10() {
 g = gen10();
 g.next();
 CheckScopeChain([debug.ScopeType.Block,
+                 debug.ScopeType.Block,
                  debug.ScopeType.Local,
                  debug.ScopeType.Script,
                  debug.ScopeType.Global], g);
-CheckScopeContent({i: 0}, 0, g);
+CheckScopeContent({i: 0}, 1, g);
 
 g.next();
-CheckScopeContent({i: 1}, 0, g);
+CheckScopeContent({i: 1}, 1, g);
 
 // Nested generators.
 

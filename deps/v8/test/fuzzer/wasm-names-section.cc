@@ -5,8 +5,9 @@
 #include "src/objects-inl.h"
 #include "test/fuzzer/wasm-fuzzer-common.h"
 
+using namespace v8::internal::wasm::fuzzer;
+
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // TODO(titzer): Names section requires a preceding function section.
-  return v8::internal::wasm::fuzzer::FuzzWasmSection(
-      v8::internal::wasm::kNameSectionCode, data, size);
+  return FuzzWasmSection(v8::internal::wasm::kNameSectionCode, data, size);
 }

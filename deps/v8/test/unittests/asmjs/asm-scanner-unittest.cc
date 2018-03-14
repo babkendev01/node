@@ -15,40 +15,38 @@ namespace internal {
 
 class AsmJsScannerTest : public ::testing::Test {
  protected:
-  void SetupScanner(const char* source) {
-    stream = ScannerStream::ForTesting(source);
-    scanner.reset(new AsmJsScanner(stream.get()));
+  void SetupSource(const char* source) {
+    scanner.SetStream(ScannerStream::ForTesting(source));
   }
 
   void Skip(AsmJsScanner::token_t t) {
-    CHECK_EQ(t, scanner->Token());
-    scanner->Next();
+    CHECK_EQ(t, scanner.Token());
+    scanner.Next();
   }
 
   void SkipGlobal() {
-    CHECK(scanner->IsGlobal());
-    scanner->Next();
+    CHECK(scanner.IsGlobal());
+    scanner.Next();
   }
 
   void SkipLocal() {
-    CHECK(scanner->IsLocal());
-    scanner->Next();
+    CHECK(scanner.IsLocal());
+    scanner.Next();
   }
 
-  void CheckForEnd() { CHECK(scanner->Token() == AsmJsScanner::kEndOfInput); }
+  void CheckForEnd() { CHECK(scanner.Token() == AsmJsScanner::kEndOfInput); }
 
   void CheckForParseError() {
-    CHECK(scanner->Token() == AsmJsScanner::kParseError);
+    CHECK(scanner.Token() == AsmJsScanner::kParseError);
   }
 
-  std::unique_ptr<Utf16CharacterStream> stream;
-  std::unique_ptr<AsmJsScanner> scanner;
+  AsmJsScanner scanner;
 };
 
 TEST_F(AsmJsScannerTest, SimpleFunction) {
-  SetupScanner("function foo() { return; }");
+  SetupSource("function foo() { return; }");
   Skip(TOK(function));
-  DCHECK_EQ("foo", scanner->GetIdentifierString());
+  DCHECK_EQ("foo", scanner.GetIdentifierString());
   SkipGlobal();
   Skip('(');
   Skip(')');
@@ -62,7 +60,7 @@ TEST_F(AsmJsScannerTest, SimpleFunction) {
 }
 
 TEST_F(AsmJsScannerTest, JSKeywords) {
-  SetupScanner(
+  SetupSource(
       "arguments break case const continue\n"
       "default do else eval for function\n"
       "if new return switch var while\n");
@@ -89,7 +87,7 @@ TEST_F(AsmJsScannerTest, JSKeywords) {
 }
 
 TEST_F(AsmJsScannerTest, JSOperatorsSpread) {
-  SetupScanner(
+  SetupSource(
       "+ - * / % & | ^ ~ << >> >>>\n"
       "< > <= >= == !=\n");
   Skip('+');
@@ -114,7 +112,7 @@ TEST_F(AsmJsScannerTest, JSOperatorsSpread) {
 }
 
 TEST_F(AsmJsScannerTest, JSOperatorsTight) {
-  SetupScanner(
+  SetupSource(
       "+-*/%&|^~<<>> >>>\n"
       "<><=>= ==!=\n");
   Skip('+');
@@ -139,17 +137,17 @@ TEST_F(AsmJsScannerTest, JSOperatorsTight) {
 }
 
 TEST_F(AsmJsScannerTest, UsesOfAsm) {
-  SetupScanner("'use asm' \"use asm\"\n");
+  SetupSource("'use asm' \"use asm\"\n");
   Skip(TOK(UseAsm));
   Skip(TOK(UseAsm));
   CheckForEnd();
 }
 
 TEST_F(AsmJsScannerTest, DefaultGlobalScope) {
-  SetupScanner("var x = x + x;");
+  SetupSource("var x = x + x;");
   Skip(TOK(var));
-  CHECK_EQ("x", scanner->GetIdentifierString());
-  AsmJsScanner::token_t x = scanner->Token();
+  CHECK_EQ("x", scanner.GetIdentifierString());
+  AsmJsScanner::token_t x = scanner.Token();
   SkipGlobal();
   Skip('=');
   Skip(x);
@@ -160,11 +158,11 @@ TEST_F(AsmJsScannerTest, DefaultGlobalScope) {
 }
 
 TEST_F(AsmJsScannerTest, GlobalScope) {
-  SetupScanner("var x = x + x;");
-  scanner->EnterGlobalScope();
+  SetupSource("var x = x + x;");
+  scanner.EnterGlobalScope();
   Skip(TOK(var));
-  CHECK_EQ("x", scanner->GetIdentifierString());
-  AsmJsScanner::token_t x = scanner->Token();
+  CHECK_EQ("x", scanner.GetIdentifierString());
+  AsmJsScanner::token_t x = scanner.Token();
   SkipGlobal();
   Skip('=');
   Skip(x);
@@ -175,11 +173,11 @@ TEST_F(AsmJsScannerTest, GlobalScope) {
 }
 
 TEST_F(AsmJsScannerTest, LocalScope) {
-  SetupScanner("var x = x + x;");
-  scanner->EnterLocalScope();
+  SetupSource("var x = x + x;");
+  scanner.EnterLocalScope();
   Skip(TOK(var));
-  CHECK_EQ("x", scanner->GetIdentifierString());
-  AsmJsScanner::token_t x = scanner->Token();
+  CHECK_EQ("x", scanner.GetIdentifierString());
+  AsmJsScanner::token_t x = scanner.Token();
   SkipLocal();
   Skip('=');
   Skip(x);
@@ -190,41 +188,41 @@ TEST_F(AsmJsScannerTest, LocalScope) {
 }
 
 TEST_F(AsmJsScannerTest, Numbers) {
-  SetupScanner("1 1.2 0x1f 1.e3");
+  SetupSource("1 1.2 0x1f 1.e3");
 
-  CHECK(scanner->IsUnsigned());
-  CHECK_EQ(1, scanner->AsUnsigned());
-  scanner->Next();
+  CHECK(scanner.IsUnsigned());
+  CHECK_EQ(1, scanner.AsUnsigned());
+  scanner.Next();
 
-  CHECK(scanner->IsDouble());
-  CHECK_EQ(1.2, scanner->AsDouble());
-  scanner->Next();
+  CHECK(scanner.IsDouble());
+  CHECK_EQ(1.2, scanner.AsDouble());
+  scanner.Next();
 
-  CHECK(scanner->IsUnsigned());
-  CHECK_EQ(31, scanner->AsUnsigned());
-  scanner->Next();
+  CHECK(scanner.IsUnsigned());
+  CHECK_EQ(31, scanner.AsUnsigned());
+  scanner.Next();
 
-  CHECK(scanner->IsDouble());
-  CHECK_EQ(1.0e3, scanner->AsDouble());
-  scanner->Next();
+  CHECK(scanner.IsDouble());
+  CHECK_EQ(1.0e3, scanner.AsDouble());
+  scanner.Next();
 
   CheckForEnd();
 }
 
 TEST_F(AsmJsScannerTest, UnsignedNumbers) {
-  SetupScanner("0x7fffffff 0x80000000 0xffffffff 0x100000000");
+  SetupSource("0x7fffffff 0x80000000 0xffffffff 0x100000000");
 
-  CHECK(scanner->IsUnsigned());
-  CHECK_EQ(0x7fffffff, scanner->AsUnsigned());
-  scanner->Next();
+  CHECK(scanner.IsUnsigned());
+  CHECK_EQ(0x7fffffff, scanner.AsUnsigned());
+  scanner.Next();
 
-  CHECK(scanner->IsUnsigned());
-  CHECK_EQ(0x80000000, scanner->AsUnsigned());
-  scanner->Next();
+  CHECK(scanner.IsUnsigned());
+  CHECK_EQ(0x80000000, scanner.AsUnsigned());
+  scanner.Next();
 
-  CHECK(scanner->IsUnsigned());
-  CHECK_EQ(0xffffffff, scanner->AsUnsigned());
-  scanner->Next();
+  CHECK(scanner.IsUnsigned());
+  CHECK_EQ(0xffffffff, scanner.AsUnsigned());
+  scanner.Next();
 
   // Numeric "unsigned" literals with a payload of more than 32-bit are rejected
   // by asm.js in all contexts, we hence consider `0x100000000` to be an error.
@@ -232,30 +230,30 @@ TEST_F(AsmJsScannerTest, UnsignedNumbers) {
 }
 
 TEST_F(AsmJsScannerTest, BadNumber) {
-  SetupScanner(".123fe");
+  SetupSource(".123fe");
   Skip('.');
   CheckForParseError();
 }
 
 TEST_F(AsmJsScannerTest, Rewind1) {
-  SetupScanner("+ - * /");
+  SetupSource("+ - * /");
   Skip('+');
-  scanner->Rewind();
+  scanner.Rewind();
   Skip('+');
   Skip('-');
-  scanner->Rewind();
+  scanner.Rewind();
   Skip('-');
   Skip('*');
-  scanner->Rewind();
+  scanner.Rewind();
   Skip('*');
   Skip('/');
-  scanner->Rewind();
+  scanner.Rewind();
   Skip('/');
   CheckForEnd();
 }
 
 TEST_F(AsmJsScannerTest, Comments) {
-  SetupScanner(
+  SetupSource(
       "var // This is a test /* */ eval\n"
       "var /* test *** test */ eval\n"
       "function /* this */ ^");
@@ -268,22 +266,22 @@ TEST_F(AsmJsScannerTest, Comments) {
 }
 
 TEST_F(AsmJsScannerTest, TrailingCComment) {
-  SetupScanner("var /* test\n");
+  SetupSource("var /* test\n");
   Skip(TOK(var));
   CheckForParseError();
 }
 
 TEST_F(AsmJsScannerTest, Seeking) {
-  SetupScanner("var eval do arguments function break\n");
+  SetupSource("var eval do arguments function break\n");
   Skip(TOK(var));
-  size_t old_pos = scanner->Position();
+  size_t old_pos = scanner.Position();
   Skip(TOK(eval));
   Skip(TOK(do));
   Skip(TOK(arguments));
-  scanner->Rewind();
+  scanner.Rewind();
   Skip(TOK(arguments));
-  scanner->Rewind();
-  scanner->Seek(old_pos);
+  scanner.Rewind();
+  scanner.Seek(old_pos);
   Skip(TOK(eval));
   Skip(TOK(do));
   Skip(TOK(arguments));
@@ -293,19 +291,19 @@ TEST_F(AsmJsScannerTest, Seeking) {
 }
 
 TEST_F(AsmJsScannerTest, Newlines) {
-  SetupScanner(
+  SetupSource(
       "var x = 1\n"
       "var y = 2\n");
   Skip(TOK(var));
-  scanner->Next();
+  scanner.Next();
   Skip('=');
-  scanner->Next();
-  CHECK(scanner->IsPrecededByNewline());
+  scanner.Next();
+  CHECK(scanner.IsPrecededByNewline());
   Skip(TOK(var));
-  scanner->Next();
+  scanner.Next();
   Skip('=');
-  scanner->Next();
-  CHECK(scanner->IsPrecededByNewline());
+  scanner.Next();
+  CHECK(scanner.IsPrecededByNewline());
   CheckForEnd();
 }
 

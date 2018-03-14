@@ -15,22 +15,14 @@
       "resources": ["proxies.js"],
       "results_regexp": "^%s\\-Proxies\\(Score\\): (.+)$",
       "tests": [
-        {"name": "GetStringWithoutTrap"},
-        {"name": "GetStringWithTrap"},
-        {"name": "GetIndexWithoutTrap"},
-        {"name": "GetIndexWithTrap"},
-        {"name": "GetSymbolWithoutTrap"},
-        {"name": "GetSymbolWithTrap"},
-        {"name": "HasStringWithoutTrap"},
-        {"name": "HasStringWithTrap"},
-        {"name": "HasSymbolWithoutTrap"},
-        {"name": "HasSymbolWithTrap"},
-        {"name": "SetStringWithoutTrap"},
-        {"name": "SetStringWithTrap"},
-        {"name": "SetIndexWithoutTrap"},
-        {"name": "SetIndexWithTrap"},
-        {"name": "SetSymbolWithoutTrap"},
-        {"name": "SetSymbolWithTrap"}
+        {"name": "ProxyConstructorWithArrowFunc"},
+        {"name": "ProxyConstructorWithClass"},
+        {"name": "ProxyConstructorWithObject"},
+        {"name": "ProxyConstructorWithProxy"},
+        {"name": "CallProxyWithoutTrap"},
+        {"name": "CallProxyWithTrap"},
+        {"name": "ConstructProxyWithoutTrap"},
+        {"name": "ConstructProxyWithTrap"}
       ]
     },
     {
@@ -88,15 +80,11 @@
       "name": "Classes",
       "path": ["Classes"],
       "main": "run.js",
-      "resources": [
-        "super.js",
-        "default-constructor.js",
-        "leaf-constructors.js"],
+      "resources": ["super.js", "default-constructor.js"],
       "results_regexp": "^%s\\-Classes\\(Score\\): (.+)$",
       "tests": [
         {"name": "Super"},
-        {"name": "DefaultConstructor"},
-        {"name": "LeafConstructors"}
+        {"name": "DefaultConstructor"}
       ]
     },
     {
@@ -119,17 +107,6 @@
       "results_regexp": "^%s\\-Closures\\(Score\\): (.+)$",
       "tests": [
         {"name": "Closures"}
-      ]
-    },
-    {
-      "name": "ManyClosures",
-      "path": ["ManyClosures"],
-      "main": "run.js",
-      "resources": ["create-many-closures.js"],
-      "flags": [ "--allow-natives-syntax", "--expose-gc" ],
-      "results_regexp": "^%s\\-ManyClosures\\(Score\\): (.+)$",
-      "tests": [
-        {"name": "ManyClosures"}
       ]
     },
     {
@@ -343,24 +320,6 @@
           "test_flags": ["construct-all-typedarrays"]
         },
         {
-          "name": "SetFromArrayLike",
-          "main": "run.js",
-          "resources": ["set-from-arraylike.js"],
-          "test_flags": ["set-from-arraylike"]
-        },
-        {
-          "name": "SetFromDifferentType",
-          "main": "run.js",
-          "resources": ["set-from-different-type.js"],
-          "test_flags": ["set-from-different-type"]
-        },
-        {
-          "name": "SetFromSameType",
-          "main": "run.js",
-          "resources": ["set-from-same-type.js"],
-          "test_flags": ["set-from-same-type"]
-        },
-        {
           "name": "Sort",
           "main": "run.js",
           "resources": ["sort.js"],
@@ -373,8 +332,7 @@
       "path": ["Array"],
       "main": "run.js",
       "resources": [
-        "filter.js", "map.js", "every.js", "join.js", "some.js",
-        "reduce.js", "reduce-right.js", "to-string.js"
+        "filter.js", "map.js", "every.js", "some.js", "reduce.js", "reduce-right.js"
       ],
       "flags": [
         "--allow-natives-syntax"
@@ -398,10 +356,6 @@
         {"name": "FastEvery"},
         {"name": "ObjectEvery"},
 	{"name": "OptFastEvery"},
-	      {"name": "SmiJoin"},
-	      {"name": "StringJoin"},
-	      {"name": "SparseSmiJoin"},
-	      {"name": "SparseStringJoin"},
         {"name": "DoubleSome"},
         {"name": "SmiSome"},
         {"name": "FastSome"},
@@ -416,11 +370,7 @@
         {"name": "SmiReduceRight"},
         {"name": "FastReduceRight"},
         {"name": "ObjectReduceRight"},
-	{"name": "OptFastReduceRight"},
-	      {"name": "SmiToString"},
-	      {"name": "StringToString"},
-	      {"name": "SparseSmiToString"},
-	      {"name": "SparseStringToString"}
+	{"name": "OptFastReduceRight"}
       ]
     },
     {
@@ -609,8 +559,7 @@
       "results_regexp": "^%s\\-Inspector\\(Score\\): (.+)$",
       "tests": [
         {"name": "Debugger.paused"},
-        {"name": "Runtime.evaluate(String16Cstor)"},
-        {"name": "Debugger.getPossibleBreakpoints"}
+        {"name": "Runtime.evaluate(String16Cstor)"}
       ]
     }
   ]

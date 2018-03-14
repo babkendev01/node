@@ -43,8 +43,8 @@
 #include "src/v8.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 TEST(Hex) {
   UnicodeCache uc;
@@ -502,6 +502,3 @@ TEST(PositiveNumberToUint32) {
   number = factory->NewHeapNumber(std::nan(""));
   CHECK_EQ(PositiveNumberToUint32(*number), 0u);
 }
-
-}  // namespace internal
-}  // namespace v8

@@ -94,8 +94,6 @@ void PropertyHandlerCompiler::GenerateApiAccessorCall(
   DCHECK(optimization.is_simple_api_call());
 
   __ PopReturnAddressTo(scratch);
-  // accessor_holder
-  __ Push(accessor_holder);
   // receiver
   __ Push(receiver);
   // Write the arguments to stack frame.
@@ -287,8 +285,9 @@ Register PropertyHandlerCompiler::CheckPrototypes(
       Map::GetOrCreatePrototypeChainValidityCell(receiver_map, isolate());
   if (!validity_cell.is_null()) {
     DCHECK_EQ(Smi::FromInt(Map::kPrototypeChainValid), validity_cell->value());
-    __ Move(scratch1, validity_cell);
-    __ SmiCompare(FieldOperand(scratch1, Cell::kValueOffset),
+    __ Move(scratch1, validity_cell, RelocInfo::CELL);
+    // Move(..., CELL) loads the payload's address!
+    __ SmiCompare(Operand(scratch1, 0),
                   Smi::FromInt(Map::kPrototypeChainValid));
     __ j(not_equal, miss);
   }

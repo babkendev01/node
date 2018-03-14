@@ -12,28 +12,10 @@ Error.prepareStackTrace = function(error, frames) {
   return frames;
 };
 
-function testTrapLocations(instance, expected_stack_length) {
-  function testWasmTrap(value, reason, position) {
-    try {
-      instance.exports.main(value);
-      fail('expected wasm exception');
-    } catch (e) {
-      assertEquals(kTrapMsgs[reason], e.message, 'trap reason');
-      assertEquals(expected_stack_length, e.stack.length, 'number of frames');
-      assertEquals(0, e.stack[0].getLineNumber(), 'wasmFunctionIndex');
-      assertEquals(position, e.stack[0].getPosition(), 'position');
-    }
-  }
-
-  // The actual tests:
-  testWasmTrap(0, kTrapDivByZero, 14);
-  testWasmTrap(1, kTrapMemOutOfBounds, 15);
-  testWasmTrap(2, kTrapUnreachable, 28);
-  testWasmTrap(3, kTrapFuncInvalid, 32);
-}
-
 var builder = new WasmModuleBuilder();
+
 builder.addMemory(0, 1, false);
+
 var sig_index = builder.addType(kSig_i_v)
 
 // Build a function to resemble this code:
@@ -78,12 +60,22 @@ builder.addFunction("main", kSig_i_i)
   .exportAs("main");
 builder.appendToTable([0]);
 
-let buffer = builder.toBuffer();
+var module = builder.instantiate();
 
-// Test async compilation and instantiation.
-assertPromiseResult(WebAssembly.instantiate(buffer), pair => {
-  testTrapLocations(pair.instance, 6);
-});
+function testWasmTrap(value, reason, position) {
+  try {
+    module.exports.main(value);
+    fail("expected wasm exception");
+  } catch (e) {
+    assertEquals(kTrapMsgs[reason], e.message, "trap reason");
+    assertEquals(3, e.stack.length, "number of frames");
+    assertEquals(0, e.stack[0].getLineNumber(), "wasmFunctionIndex");
+    assertEquals(position, e.stack[0].getPosition(), "position");
+  }
+}
 
-// Test sync compilation and instantiation.
-testTrapLocations(builder.instantiate(), 4);
+// The actual tests:
+testWasmTrap(0, kTrapDivByZero,      14);
+testWasmTrap(1, kTrapMemOutOfBounds, 15);
+testWasmTrap(2, kTrapUnreachable,    28);
+testWasmTrap(3, kTrapFuncInvalid,    32);

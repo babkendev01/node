@@ -3918,6 +3918,7 @@ void Hmac::New(const FunctionCallbackInfo<Value>& args) {
 void Hmac::HmacInit(const char* hash_type, const char* key, int key_len) {
   HandleScope scope(env()->isolate());
 
+  CHECK_EQ(initialised_, false);
   const EVP_MD* md = EVP_get_digestbyname(hash_type);
   if (md == nullptr) {
     return env()->ThrowError("Unknown message digest");
@@ -4065,6 +4066,7 @@ void Hash::New(const FunctionCallbackInfo<Value>& args) {
 
 
 bool Hash::HashInit(const char* hash_type) {
+  CHECK_EQ(initialised_, false);
   const EVP_MD* md = EVP_get_digestbyname(hash_type);
   if (md == nullptr)
     return false;
@@ -4096,6 +4098,9 @@ void Hash::HashUpdate(const FunctionCallbackInfo<Value>& args) {
 
   THROW_AND_RETURN_IF_NOT_STRING_OR_BUFFER(args[0], "Data");
 
+  if (!hash->initialised_) {
+    return env->ThrowError("Not initialized");
+  }
   if (hash->finalized_) {
     return env->ThrowError("Digest already called");
   }
@@ -4125,6 +4130,9 @@ void Hash::HashDigest(const FunctionCallbackInfo<Value>& args) {
   Hash* hash;
   ASSIGN_OR_RETURN_UNWRAP(&hash, args.Holder());
 
+  if (!hash->initialised_) {
+    return env->ThrowError("Not initialized");
+  }
   if (hash->finalized_) {
     return env->ThrowError("Digest already called");
   }

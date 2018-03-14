@@ -90,7 +90,7 @@ class FunctionBodyDecoderTest : public TestWithZone {
   FunctionBodyDecoderTest() : module(nullptr), local_decls(zone()) {}
 
   TestSignatures sigs;
-  WasmModule* module;
+  ModuleEnv* module;
   LocalDeclEncoder local_decls;
 
   void AddLocals(ValueType type, uint32_t count) {
@@ -121,8 +121,9 @@ class FunctionBodyDecoderTest : public TestWithZone {
     PrepareBytecode(&start, &end);
 
     // Verify the code.
-    DecodeResult result =
-        VerifyWasmCode(zone()->allocator(), module, sig, start, end);
+    DecodeResult result = VerifyWasmCode(
+        zone()->allocator(), module == nullptr ? nullptr : module->module, sig,
+        start, end);
 
     uint32_t pc = result.error_offset();
     std::ostringstream str;
@@ -185,24 +186,22 @@ class FunctionBodyDecoderTest : public TestWithZone {
 };
 
 namespace {
-
-constexpr size_t kMaxByteSizedLeb128 = 127;
-
 // A helper for tests that require a module environment for functions,
 // globals, or memories.
-class TestModuleBuilder {
+class TestModuleEnv : public ModuleEnv {
  public:
-  explicit TestModuleBuilder(ModuleOrigin origin = kWasmOrigin) {
+  explicit TestModuleEnv(ModuleOrigin origin = kWasmOrigin)
+      : ModuleEnv(&mod, nullptr) {
     mod.set_origin(origin);
   }
   byte AddGlobal(ValueType type, bool mutability = true) {
     mod.globals.push_back({type, mutability, WasmInitExpr(), 0, false, false});
-    CHECK(mod.globals.size() <= kMaxByteSizedLeb128);
+    CHECK(mod.globals.size() <= 127);
     return static_cast<byte>(mod.globals.size() - 1);
   }
   byte AddSignature(FunctionSig* sig) {
     mod.signatures.push_back(sig);
-    CHECK(mod.signatures.size() <= kMaxByteSizedLeb128);
+    CHECK(mod.signatures.size() <= 127);
     return static_cast<byte>(mod.signatures.size() - 1);
   }
   byte AddFunction(FunctionSig* sig) {
@@ -213,7 +212,7 @@ class TestModuleBuilder {
                              {0, 0},   // code
                              false,    // import
                              false});  // export
-    CHECK(mod.functions.size() <= kMaxByteSizedLeb128);
+    CHECK(mod.functions.size() <= 127);
     return static_cast<byte>(mod.functions.size() - 1);
   }
   byte AddImport(FunctionSig* sig) {
@@ -221,21 +220,14 @@ class TestModuleBuilder {
     mod.functions[result].imported = true;
     return result;
   }
-  byte AddException(WasmExceptionSig* sig) {
-    mod.exceptions.emplace_back(sig);
-    CHECK(mod.signatures.size() <= kMaxByteSizedLeb128);
-    return static_cast<byte>(mod.exceptions.size() - 1);
-  }
 
   void InitializeMemory() {
     mod.has_memory = true;
-    mod.initial_pages = 1;
-    mod.maximum_pages = 100;
+    mod.min_mem_pages = 1;
+    mod.max_mem_pages = 100;
   }
 
   void InitializeFunctionTable() { mod.function_tables.emplace_back(); }
-
-  WasmModule* module() { return &mod; }
 
  private:
   WasmModule mod;
@@ -1089,9 +1081,9 @@ TEST_F(FunctionBodyDecoderTest, TypeConversions) {
 }
 
 TEST_F(FunctionBodyDecoderTest, MacrosStmt) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   EXPECT_VERIFIES(v_i, WASM_SET_LOCAL(0, WASM_I32V_3(87348)));
   EXPECT_VERIFIES(v_i, WASM_STORE_MEM(MachineType::Int32(), WASM_I32V_1(24),
                                       WASM_I32V_1(40)));
@@ -1228,18 +1220,18 @@ TEST_F(FunctionBodyDecoderTest, AllSimpleExpressions) {
 }
 
 TEST_F(FunctionBodyDecoderTest, MemorySize) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   byte code[] = {kExprMemorySize, 0};
   EXPECT_VERIFIES_C(i_i, code);
   EXPECT_FAILURE_C(f_ff, code);
 }
 
 TEST_F(FunctionBodyDecoderTest, LoadMemOffset) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   for (int offset = 0; offset < 128; offset += 7) {
     byte code[] = {kExprI32Const, 0, kExprI32LoadMem, ZERO_ALIGNMENT,
                    static_cast<byte>(offset)};
@@ -1248,9 +1240,9 @@ TEST_F(FunctionBodyDecoderTest, LoadMemOffset) {
 }
 
 TEST_F(FunctionBodyDecoderTest, LoadMemAlignment) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   struct {
     WasmOpcode instruction;
     uint32_t maximum_aligment;
@@ -1285,9 +1277,9 @@ TEST_F(FunctionBodyDecoderTest, LoadMemAlignment) {
 }
 
 TEST_F(FunctionBodyDecoderTest, StoreMemOffset) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   for (byte offset = 0; offset < 128; offset += 7) {
     byte code[] = {WASM_STORE_MEM_OFFSET(MachineType::Int32(), offset,
                                          WASM_ZERO, WASM_ZERO)};
@@ -1296,9 +1288,9 @@ TEST_F(FunctionBodyDecoderTest, StoreMemOffset) {
 }
 
 TEST_F(FunctionBodyDecoderTest, StoreMemOffset_void) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   EXPECT_FAILURE(i_i, WASM_STORE_MEM_OFFSET(MachineType::Int32(), 0, WASM_ZERO,
                                             WASM_ZERO));
 }
@@ -1314,9 +1306,9 @@ TEST_F(FunctionBodyDecoderTest, StoreMemOffset_void) {
 #define VARINT4(x) BYTE0(x) | 0x80, BYTE1(x) | 0x80, BYTE2(x) | 0x80, BYTE3(x)
 
 TEST_F(FunctionBodyDecoderTest, LoadMemOffset_varint) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   EXPECT_VERIFIES(i_i, WASM_ZERO, kExprI32LoadMem, ZERO_ALIGNMENT,
                   VARINT1(0x45));
   EXPECT_VERIFIES(i_i, WASM_ZERO, kExprI32LoadMem, ZERO_ALIGNMENT,
@@ -1328,9 +1320,9 @@ TEST_F(FunctionBodyDecoderTest, LoadMemOffset_varint) {
 }
 
 TEST_F(FunctionBodyDecoderTest, StoreMemOffset_varint) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   EXPECT_VERIFIES(v_i, WASM_ZERO, WASM_ZERO, kExprI32StoreMem, ZERO_ALIGNMENT,
                   VARINT1(0x33));
   EXPECT_VERIFIES(v_i, WASM_ZERO, WASM_ZERO, kExprI32StoreMem, ZERO_ALIGNMENT,
@@ -1342,9 +1334,9 @@ TEST_F(FunctionBodyDecoderTest, StoreMemOffset_varint) {
 }
 
 TEST_F(FunctionBodyDecoderTest, AllLoadMemCombinations) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   for (size_t i = 0; i < arraysize(kValueTypes); i++) {
     ValueType local_type = kValueTypes[i];
     for (size_t j = 0; j < arraysize(machineTypes); j++) {
@@ -1361,9 +1353,9 @@ TEST_F(FunctionBodyDecoderTest, AllLoadMemCombinations) {
 }
 
 TEST_F(FunctionBodyDecoderTest, AllStoreMemCombinations) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
   for (size_t i = 0; i < arraysize(kValueTypes); i++) {
     ValueType local_type = kValueTypes[i];
     for (size_t j = 0; j < arraysize(machineTypes); j++) {
@@ -1381,12 +1373,12 @@ TEST_F(FunctionBodyDecoderTest, AllStoreMemCombinations) {
 
 TEST_F(FunctionBodyDecoderTest, SimpleCalls) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddFunction(sigs.i_v());
-  builder.AddFunction(sigs.i_i());
-  builder.AddFunction(sigs.i_ii());
+  module_env.AddFunction(sigs.i_v());
+  module_env.AddFunction(sigs.i_i());
+  module_env.AddFunction(sigs.i_ii());
 
   EXPECT_VERIFIES_S(sig, WASM_CALL_FUNCTION0(0));
   EXPECT_VERIFIES_S(sig, WASM_CALL_FUNCTION(1, WASM_I32V_1(27)));
@@ -1396,12 +1388,12 @@ TEST_F(FunctionBodyDecoderTest, SimpleCalls) {
 
 TEST_F(FunctionBodyDecoderTest, CallsWithTooFewArguments) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddFunction(sigs.i_i());
-  builder.AddFunction(sigs.i_ii());
-  builder.AddFunction(sigs.f_ff());
+  module_env.AddFunction(sigs.i_i());
+  module_env.AddFunction(sigs.i_ii());
+  module_env.AddFunction(sigs.f_ff());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION0(0));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(1, WASM_ZERO));
@@ -1410,10 +1402,10 @@ TEST_F(FunctionBodyDecoderTest, CallsWithTooFewArguments) {
 
 TEST_F(FunctionBodyDecoderTest, CallsWithMismatchedSigs2) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddFunction(sigs.i_i());
+  module_env.AddFunction(sigs.i_i());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(0, WASM_I64V_1(17)));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(0, WASM_F32(17.1)));
@@ -1422,16 +1414,16 @@ TEST_F(FunctionBodyDecoderTest, CallsWithMismatchedSigs2) {
 
 TEST_F(FunctionBodyDecoderTest, CallsWithMismatchedSigs3) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddFunction(sigs.i_f());
+  module_env.AddFunction(sigs.i_f());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(0, WASM_I32V_1(17)));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(0, WASM_I64V_1(27)));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(0, WASM_F64(37.2)));
 
-  builder.AddFunction(sigs.i_d());
+  module_env.AddFunction(sigs.i_d());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(1, WASM_I32V_1(16)));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(1, WASM_I64V_1(16)));
@@ -1443,11 +1435,11 @@ TEST_F(FunctionBodyDecoderTest, MultiReturn) {
   ValueType storage[] = {kWasmI32, kWasmI32};
   FunctionSig sig_ii_v(2, 0, storage);
   FunctionSig sig_v_ii(0, 2, storage);
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddFunction(&sig_v_ii);
-  builder.AddFunction(&sig_ii_v);
+  module_env.AddFunction(&sig_v_ii);
+  module_env.AddFunction(&sig_ii_v);
 
   EXPECT_VERIFIES_S(&sig_ii_v, WASM_CALL_FUNCTION0(1));
   EXPECT_VERIFIES(v_v, WASM_CALL_FUNCTION0(1), WASM_DROP, WASM_DROP);
@@ -1465,9 +1457,9 @@ TEST_F(FunctionBodyDecoderTest, MultiReturnType) {
           ValueType storage_cd[] = {kValueTypes[c], kValueTypes[d]};
           FunctionSig sig_cd_v(2, 0, storage_cd);
 
-          TestModuleBuilder builder;
-          module = builder.module();
-          builder.AddFunction(&sig_cd_v);
+          TestModuleEnv module_env;
+          module = &module_env;
+          module_env.AddFunction(&sig_cd_v);
 
           EXPECT_VERIFIES_S(&sig_cd_v, WASM_CALL_FUNCTION0(0));
 
@@ -1484,13 +1476,13 @@ TEST_F(FunctionBodyDecoderTest, MultiReturnType) {
 
 TEST_F(FunctionBodyDecoderTest, SimpleIndirectCalls) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  builder.InitializeFunctionTable();
-  module = builder.module();
+  TestModuleEnv module_env;
+  module_env.InitializeFunctionTable();
+  module = &module_env;
 
-  byte f0 = builder.AddSignature(sigs.i_v());
-  byte f1 = builder.AddSignature(sigs.i_i());
-  byte f2 = builder.AddSignature(sigs.i_ii());
+  byte f0 = module_env.AddSignature(sigs.i_v());
+  byte f1 = module_env.AddSignature(sigs.i_i());
+  byte f2 = module_env.AddSignature(sigs.i_ii());
 
   EXPECT_VERIFIES_S(sig, WASM_CALL_INDIRECT0(f0, WASM_ZERO));
   EXPECT_VERIFIES_S(sig, WASM_CALL_INDIRECT1(f1, WASM_ZERO, WASM_I32V_1(22)));
@@ -1500,16 +1492,16 @@ TEST_F(FunctionBodyDecoderTest, SimpleIndirectCalls) {
 
 TEST_F(FunctionBodyDecoderTest, IndirectCallsOutOfBounds) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  builder.InitializeFunctionTable();
-  module = builder.module();
+  TestModuleEnv module_env;
+  module_env.InitializeFunctionTable();
+  module = &module_env;
 
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT0(0, WASM_ZERO));
-  builder.AddSignature(sigs.i_v());
+  module_env.AddSignature(sigs.i_v());
   EXPECT_VERIFIES_S(sig, WASM_CALL_INDIRECT0(0, WASM_ZERO));
 
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(1, WASM_ZERO, WASM_I32V_1(22)));
-  builder.AddSignature(sigs.i_i());
+  module_env.AddSignature(sigs.i_i());
   EXPECT_VERIFIES_S(sig, WASM_CALL_INDIRECT1(1, WASM_ZERO, WASM_I32V_1(27)));
 
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(2, WASM_ZERO, WASM_I32V_1(27)));
@@ -1517,11 +1509,11 @@ TEST_F(FunctionBodyDecoderTest, IndirectCallsOutOfBounds) {
 
 TEST_F(FunctionBodyDecoderTest, IndirectCallsWithMismatchedSigs3) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  builder.InitializeFunctionTable();
-  module = builder.module();
+  TestModuleEnv module_env;
+  module_env.InitializeFunctionTable();
+  module = &module_env;
 
-  byte f0 = builder.AddFunction(sigs.i_f());
+  byte f0 = module_env.AddFunction(sigs.i_f());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(f0, WASM_ZERO, WASM_I32V_1(17)));
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(f0, WASM_ZERO, WASM_I64V_1(27)));
@@ -1531,7 +1523,7 @@ TEST_F(FunctionBodyDecoderTest, IndirectCallsWithMismatchedSigs3) {
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT0(f0, WASM_I64V_1(27)));
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT0(f0, WASM_F64(37.2)));
 
-  byte f1 = builder.AddFunction(sigs.i_d());
+  byte f1 = module_env.AddFunction(sigs.i_d());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(f1, WASM_ZERO, WASM_I32V_1(16)));
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(f1, WASM_ZERO, WASM_I64V_1(16)));
@@ -1540,12 +1532,12 @@ TEST_F(FunctionBodyDecoderTest, IndirectCallsWithMismatchedSigs3) {
 
 TEST_F(FunctionBodyDecoderTest, IndirectCallsWithoutTableCrash) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  byte f0 = builder.AddSignature(sigs.i_v());
-  byte f1 = builder.AddSignature(sigs.i_i());
-  byte f2 = builder.AddSignature(sigs.i_ii());
+  byte f0 = module_env.AddSignature(sigs.i_v());
+  byte f1 = module_env.AddSignature(sigs.i_i());
+  byte f2 = module_env.AddSignature(sigs.i_ii());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT0(f0, WASM_ZERO));
   EXPECT_FAILURE_S(sig, WASM_CALL_INDIRECT1(f1, WASM_ZERO, WASM_I32V_1(22)));
@@ -1555,12 +1547,12 @@ TEST_F(FunctionBodyDecoderTest, IndirectCallsWithoutTableCrash) {
 
 TEST_F(FunctionBodyDecoderTest, SimpleImportCalls) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  byte f0 = builder.AddImport(sigs.i_v());
-  byte f1 = builder.AddImport(sigs.i_i());
-  byte f2 = builder.AddImport(sigs.i_ii());
+  byte f0 = module_env.AddImport(sigs.i_v());
+  byte f1 = module_env.AddImport(sigs.i_i());
+  byte f2 = module_env.AddImport(sigs.i_ii());
 
   EXPECT_VERIFIES_S(sig, WASM_CALL_FUNCTION0(f0));
   EXPECT_VERIFIES_S(sig, WASM_CALL_FUNCTION(f1, WASM_I32V_1(22)));
@@ -1570,17 +1562,17 @@ TEST_F(FunctionBodyDecoderTest, SimpleImportCalls) {
 
 TEST_F(FunctionBodyDecoderTest, ImportCallsWithMismatchedSigs3) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  byte f0 = builder.AddImport(sigs.i_f());
+  byte f0 = module_env.AddImport(sigs.i_f());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION0(f0));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(f0, WASM_I32V_1(17)));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(f0, WASM_I64V_1(27)));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(f0, WASM_F64(37.2)));
 
-  byte f1 = builder.AddImport(sigs.i_d());
+  byte f1 = module_env.AddImport(sigs.i_d());
 
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION0(f1));
   EXPECT_FAILURE_S(sig, WASM_CALL_FUNCTION(f1, WASM_I32V_1(16)));
@@ -1590,10 +1582,10 @@ TEST_F(FunctionBodyDecoderTest, ImportCallsWithMismatchedSigs3) {
 
 TEST_F(FunctionBodyDecoderTest, Int32Globals) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddGlobal(kWasmI32);
+  module_env.AddGlobal(kWasmI32);
 
   EXPECT_VERIFIES_S(sig, WASM_GET_GLOBAL(0));
   EXPECT_FAILURE_S(sig, WASM_SET_GLOBAL(0, WASM_GET_LOCAL(0)));
@@ -1602,11 +1594,11 @@ TEST_F(FunctionBodyDecoderTest, Int32Globals) {
 
 TEST_F(FunctionBodyDecoderTest, ImmutableGlobal) {
   FunctionSig* sig = sigs.v_v();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  uint32_t g0 = builder.AddGlobal(kWasmI32, true);
-  uint32_t g1 = builder.AddGlobal(kWasmI32, false);
+  uint32_t g0 = module_env.AddGlobal(kWasmI32, true);
+  uint32_t g1 = module_env.AddGlobal(kWasmI32, false);
 
   EXPECT_VERIFIES_S(sig, WASM_SET_GLOBAL(g0, WASM_ZERO));
   EXPECT_FAILURE_S(sig, WASM_SET_GLOBAL(g1, WASM_ZERO));
@@ -1614,13 +1606,13 @@ TEST_F(FunctionBodyDecoderTest, ImmutableGlobal) {
 
 TEST_F(FunctionBodyDecoderTest, Int32Globals_fail) {
   FunctionSig* sig = sigs.i_i();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddGlobal(kWasmI64);
-  builder.AddGlobal(kWasmI64);
-  builder.AddGlobal(kWasmF32);
-  builder.AddGlobal(kWasmF64);
+  module_env.AddGlobal(kWasmI64);
+  module_env.AddGlobal(kWasmI64);
+  module_env.AddGlobal(kWasmF32);
+  module_env.AddGlobal(kWasmF64);
 
   EXPECT_FAILURE_S(sig, WASM_GET_GLOBAL(0));
   EXPECT_FAILURE_S(sig, WASM_GET_GLOBAL(1));
@@ -1635,11 +1627,11 @@ TEST_F(FunctionBodyDecoderTest, Int32Globals_fail) {
 
 TEST_F(FunctionBodyDecoderTest, Int64Globals) {
   FunctionSig* sig = sigs.l_l();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddGlobal(kWasmI64);
-  builder.AddGlobal(kWasmI64);
+  module_env.AddGlobal(kWasmI64);
+  module_env.AddGlobal(kWasmI64);
 
   EXPECT_VERIFIES_S(sig, WASM_GET_GLOBAL(0));
   EXPECT_VERIFIES_S(sig, WASM_GET_GLOBAL(1));
@@ -1652,10 +1644,10 @@ TEST_F(FunctionBodyDecoderTest, Int64Globals) {
 
 TEST_F(FunctionBodyDecoderTest, Float32Globals) {
   FunctionSig* sig = sigs.f_ff();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddGlobal(kWasmF32);
+  module_env.AddGlobal(kWasmF32);
 
   EXPECT_VERIFIES_S(sig, WASM_GET_GLOBAL(0));
   EXPECT_VERIFIES_S(sig, WASM_SET_GLOBAL(0, WASM_GET_LOCAL(0)),
@@ -1664,10 +1656,10 @@ TEST_F(FunctionBodyDecoderTest, Float32Globals) {
 
 TEST_F(FunctionBodyDecoderTest, Float64Globals) {
   FunctionSig* sig = sigs.d_dd();
-  TestModuleBuilder builder;
-  module = builder.module();
+  TestModuleEnv module_env;
+  module = &module_env;
 
-  builder.AddGlobal(kWasmF64);
+  module_env.AddGlobal(kWasmF64);
 
   EXPECT_VERIFIES_S(sig, WASM_GET_GLOBAL(0));
   EXPECT_VERIFIES_S(sig, WASM_SET_GLOBAL(0, WASM_GET_LOCAL(0)),
@@ -1680,9 +1672,9 @@ TEST_F(FunctionBodyDecoderTest, AllGetGlobalCombinations) {
     for (size_t j = 0; j < arraysize(kValueTypes); j++) {
       ValueType global_type = kValueTypes[j];
       FunctionSig sig(1, 0, &local_type);
-      TestModuleBuilder builder;
-      module = builder.module();
-      builder.AddGlobal(global_type);
+      TestModuleEnv module_env;
+      module = &module_env;
+      module_env.AddGlobal(global_type);
       if (local_type == global_type) {
         EXPECT_VERIFIES_S(&sig, WASM_GET_GLOBAL(0));
       } else {
@@ -1698,9 +1690,9 @@ TEST_F(FunctionBodyDecoderTest, AllSetGlobalCombinations) {
     for (size_t j = 0; j < arraysize(kValueTypes); j++) {
       ValueType global_type = kValueTypes[j];
       FunctionSig sig(0, 1, &local_type);
-      TestModuleBuilder builder;
-      module = builder.module();
-      builder.AddGlobal(global_type);
+      TestModuleEnv module_env;
+      module = &module_env;
+      module_env.AddGlobal(global_type);
       if (local_type == global_type) {
         EXPECT_VERIFIES_S(&sig, WASM_SET_GLOBAL(0, WASM_GET_LOCAL(0)));
       } else {
@@ -1711,9 +1703,9 @@ TEST_F(FunctionBodyDecoderTest, AllSetGlobalCombinations) {
 }
 
 TEST_F(FunctionBodyDecoderTest, WasmGrowMemory) {
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env;
+  module = &module_env;
+  module_env.InitializeMemory();
 
   byte code[] = {WASM_GET_LOCAL(0), kExprGrowMemory, 0};
   EXPECT_VERIFIES_C(i_i, code);
@@ -1721,9 +1713,9 @@ TEST_F(FunctionBodyDecoderTest, WasmGrowMemory) {
 }
 
 TEST_F(FunctionBodyDecoderTest, AsmJsGrowMemory) {
-  TestModuleBuilder builder(kAsmJsOrigin);
-  module = builder.module();
-  builder.InitializeMemory();
+  TestModuleEnv module_env(kAsmJsOrigin);
+  module = &module_env;
+  module_env.InitializeMemory();
 
   byte code[] = {WASM_GET_LOCAL(0), kExprGrowMemory, 0};
   EXPECT_FAILURE_C(i_i, code);
@@ -1753,18 +1745,18 @@ TEST_F(FunctionBodyDecoderTest, AsmJsBinOpsCheckOrigin) {
   };
 
   {
-    TestModuleBuilder builder(kAsmJsOrigin);
-    module = builder.module();
-    builder.InitializeMemory();
+    TestModuleEnv module_env(kAsmJsOrigin);
+    module = &module_env;
+    module_env.InitializeMemory();
     for (size_t i = 0; i < arraysize(AsmJsBinOps); i++) {
       TestBinop(AsmJsBinOps[i].op, AsmJsBinOps[i].sig);
     }
   }
 
   {
-    TestModuleBuilder builder;
-    module = builder.module();
-    builder.InitializeMemory();
+    TestModuleEnv module_env;
+    module = &module_env;
+    module_env.InitializeMemory();
     for (size_t i = 0; i < arraysize(AsmJsBinOps); i++) {
       byte code[] = {
           WASM_BINOP(AsmJsBinOps[i].op, WASM_GET_LOCAL(0), WASM_GET_LOCAL(1))};
@@ -1801,18 +1793,18 @@ TEST_F(FunctionBodyDecoderTest, AsmJsUnOpsCheckOrigin) {
                     {kExprI32AsmjsSConvertF64, sigs.i_d()},
                     {kExprI32AsmjsUConvertF64, sigs.i_d()}};
   {
-    TestModuleBuilder builder(kAsmJsOrigin);
-    module = builder.module();
-    builder.InitializeMemory();
+    TestModuleEnv module_env(kAsmJsOrigin);
+    module = &module_env;
+    module_env.InitializeMemory();
     for (size_t i = 0; i < arraysize(AsmJsUnOps); i++) {
       TestUnop(AsmJsUnOps[i].op, AsmJsUnOps[i].sig);
     }
   }
 
   {
-    TestModuleBuilder builder;
-    module = builder.module();
-    builder.InitializeMemory();
+    TestModuleEnv module_env;
+    module = &module_env;
+    module_env.InitializeMemory();
     for (size_t i = 0; i < arraysize(AsmJsUnOps); i++) {
       byte code[] = {WASM_UNOP(AsmJsUnOps[i].op, WASM_GET_LOCAL(0))};
       EXPECT_FAILURE_SC(AsmJsUnOps[i].sig, code);
@@ -2241,53 +2233,28 @@ TEST_F(FunctionBodyDecoderTest, Select_TypeCheck) {
 
 TEST_F(FunctionBodyDecoderTest, Throw) {
   EXPERIMENTAL_FLAG_SCOPE(eh);
-  TestModuleBuilder builder;
-  module = builder.module();
+  // TODO(kschimpf): Need to fix throw to use declared exception.
+  EXPECT_FAILURE(v_i, WASM_GET_LOCAL(0), kExprThrow);
 
-  builder.AddException(sigs.v_v());
-  builder.AddException(sigs.v_i());
-  AddLocals(kWasmI32, 1);
-
-  EXPECT_VERIFIES(v_v, kExprThrow, 0);
-
-  // exception index out of range.
-  EXPECT_FAILURE(v_v, kExprThrow, 2);
-
-  // TODO(kschimpf): Fix when we can create exceptions with values.
-  EXPECT_FAILURE(v_v, WASM_I32V(0), kExprThrow, 1);
-
-  // TODO(kschimpf): Add more tests.
+  EXPECT_FAILURE(i_d, WASM_GET_LOCAL(0), kExprThrow, WASM_I32V(0));
+  EXPECT_FAILURE(i_f, WASM_GET_LOCAL(0), kExprThrow, WASM_I32V(0));
+  EXPECT_FAILURE(l_l, WASM_GET_LOCAL(0), kExprThrow, WASM_I64V(0));
 }
 
 TEST_F(FunctionBodyDecoderTest, ThrowUnreachable) {
   // TODO(titzer): unreachable code after throw should validate.
-  EXPERIMENTAL_FLAG_SCOPE(eh);
-  TestModuleBuilder builder;
-  module = builder.module();
-
-  builder.AddException(sigs.v_v());
-  builder.AddException(sigs.v_i());
-  AddLocals(kWasmI32, 1);
-  EXPECT_VERIFIES(i_i, kExprThrow, 0, WASM_GET_LOCAL(0));
-
-  // TODO(kschimpf): Add more (block-level) tests of unreachable to see
-  // if they validate.
+  // EXPERIMENTAL_FLAG_SCOPE(eh);
+  // EXPECT_VERIFIES(v_i, WASM_GET_LOCAL(0), kExprThrow, kExprSetLocal, 0);
 }
 
 #define WASM_TRY_OP kExprTry, kLocalVoid
 
-#define WASM_CATCH(index) kExprCatch, static_cast<byte>(index)
+#define WASM_CATCH(local) kExprCatch, static_cast<byte>(local)
 
 TEST_F(FunctionBodyDecoderTest, TryCatch) {
   EXPERIMENTAL_FLAG_SCOPE(eh);
-
-  TestModuleBuilder builder;
-  module = builder.module();
-  builder.AddException(sigs.v_v());
-  builder.AddException(sigs.v_v());
-
   // TODO(kschimpf): Need to fix catch to use declared exception.
-  EXPECT_VERIFIES(v_v, WASM_TRY_OP, WASM_CATCH(0), kExprEnd);
+  EXPECT_FAILURE(v_i, WASM_TRY_OP, WASM_CATCH(0), kExprEnd);
 
   // Missing catch.
   EXPECT_FAILURE(v_v, WASM_TRY_OP, kExprEnd);
@@ -2296,8 +2263,7 @@ TEST_F(FunctionBodyDecoderTest, TryCatch) {
   EXPECT_FAILURE(v_i, WASM_TRY_OP, WASM_CATCH(0));
 
   // Double catch.
-  // TODO(kschimpf): Fix this to verify.
-  EXPECT_FAILURE(v_i, WASM_TRY_OP, WASM_CATCH(0), WASM_CATCH(1), kExprEnd);
+  EXPECT_FAILURE(v_i, WASM_TRY_OP, WASM_CATCH(0), WASM_CATCH(0), kExprEnd);
 }
 
 TEST_F(FunctionBodyDecoderTest, MultiValBlock1) {
@@ -2442,17 +2408,17 @@ class WasmOpcodeLengthTest : public TestWithZone {
 
 TEST_F(WasmOpcodeLengthTest, Statements) {
   EXPECT_LENGTH(1, kExprNop);
+  EXPECT_LENGTH(2, kExprBlock);
+  EXPECT_LENGTH(2, kExprLoop);
+  EXPECT_LENGTH(2, kExprIf);
   EXPECT_LENGTH(1, kExprElse);
   EXPECT_LENGTH(1, kExprEnd);
   EXPECT_LENGTH(1, kExprSelect);
   EXPECT_LENGTH(2, kExprBr);
   EXPECT_LENGTH(2, kExprBrIf);
-  EXPECT_LENGTH(2, kExprThrow);
+  EXPECT_LENGTH(1, kExprThrow);
+  EXPECT_LENGTH(2, kExprTry);
   EXPECT_LENGTH(2, kExprCatch);
-  EXPECT_LENGTH_N(2, kExprBlock, kLocalI32);
-  EXPECT_LENGTH_N(2, kExprLoop, kLocalI32);
-  EXPECT_LENGTH_N(2, kExprIf, kLocalI32);
-  EXPECT_LENGTH_N(2, kExprTry, kLocalI32);
 }
 
 TEST_F(WasmOpcodeLengthTest, MiscExpressions) {

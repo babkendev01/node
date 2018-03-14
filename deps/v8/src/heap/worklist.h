@@ -6,8 +6,8 @@
 #define V8_HEAP_WORKLIST_
 
 #include <cstddef>
+#include <vector>
 
-#include "src/base/atomic-utils.h"
 #include "src/base/logging.h"
 #include "src/base/macros.h"
 #include "src/base/platform/mutex.h"
@@ -56,14 +56,14 @@ class Worklist {
   };
 
   static const int kMaxNumTasks = 8;
-  static const size_t kSegmentCapacity = SEGMENT_SIZE;
+  static const int kSegmentCapacity = SEGMENT_SIZE;
 
   Worklist() : Worklist(kMaxNumTasks) {}
 
   explicit Worklist(int num_tasks) : num_tasks_(num_tasks) {
     for (int i = 0; i < num_tasks_; i++) {
-      private_push_segment(i) = NewSegment();
-      private_pop_segment(i) = NewSegment();
+      private_push_segment(i) = new Segment();
+      private_pop_segment(i) = new Segment();
     }
   }
 
@@ -182,7 +182,7 @@ class Worklist {
 
   class Segment {
    public:
-    static const size_t kCapacity = kSegmentCapacity;
+    static const int kCapacity = kSegmentCapacity;
 
     Segment() : index_(0) {}
 
@@ -243,21 +243,22 @@ class Worklist {
     V8_INLINE void Push(Segment* segment) {
       base::LockGuard<base::Mutex> guard(&lock_);
       segment->set_next(top_);
-      set_top(segment);
+      top_ = segment;
     }
 
     V8_INLINE bool Pop(Segment** segment) {
       base::LockGuard<base::Mutex> guard(&lock_);
       if (top_ != nullptr) {
         *segment = top_;
-        set_top(top_->next());
+        top_ = top_->next();
         return true;
       }
       return false;
     }
 
     V8_INLINE bool IsEmpty() {
-      return base::AsAtomicPointer::Relaxed_Load(&top_) == nullptr;
+      base::LockGuard<base::Mutex> guard(&lock_);
+      return top_ == nullptr;
     }
 
     void Clear() {
@@ -268,7 +269,7 @@ class Worklist {
         current = current->next();
         delete tmp;
       }
-      set_top(nullptr);
+      top_ = nullptr;
     }
 
     // See Worklist::Update.
@@ -306,10 +307,6 @@ class Worklist {
     }
 
    private:
-    void set_top(Segment* segment) {
-      base::AsAtomicPointer::Relaxed_Store(&top_, segment);
-    }
-
     base::Mutex lock_;
     Segment* top_;
   };
@@ -325,19 +322,18 @@ class Worklist {
   V8_INLINE void PublishPushSegmentToGlobal(int task_id) {
     if (!private_push_segment(task_id)->IsEmpty()) {
       global_pool_.Push(private_push_segment(task_id));
-      private_push_segment(task_id) = NewSegment();
+      private_push_segment(task_id) = new Segment();
     }
   }
 
   V8_INLINE void PublishPopSegmentToGlobal(int task_id) {
     if (!private_pop_segment(task_id)->IsEmpty()) {
       global_pool_.Push(private_pop_segment(task_id));
-      private_pop_segment(task_id) = NewSegment();
+      private_pop_segment(task_id) = new Segment();
     }
   }
 
   V8_INLINE bool StealPopSegmentFromGlobal(int task_id) {
-    if (global_pool_.IsEmpty()) return false;
     Segment* new_segment = nullptr;
     if (global_pool_.Pop(&new_segment)) {
       delete private_pop_segment(task_id);
@@ -345,11 +341,6 @@ class Worklist {
       return true;
     }
     return false;
-  }
-
-  V8_INLINE Segment* NewSegment() {
-    // Bottleneck for filtering in crash dumps.
-    return new Segment();
   }
 
   PrivateSegmentHolder private_segments_[kMaxNumTasks];
@@ -360,4 +351,4 @@ class Worklist {
 }  // namespace internal
 }  // namespace v8
 
-#endif  // V8_HEAP_WORKLIST_
+#endif  // V8_HEAP_WORKSTEALING_BAG_

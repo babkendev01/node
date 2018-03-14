@@ -17,7 +17,6 @@ namespace internal {
 class CompilationInfo;
 class CompilationJob;
 class RegisterConfiguration;
-class JumpOptimizationInfo;
 
 namespace trap_handler {
 struct ProtectedInstructionData;
@@ -56,8 +55,7 @@ class Pipeline : public AllStatic {
                                               CallDescriptor* call_descriptor,
                                               Graph* graph, Schedule* schedule,
                                               Code::Flags flags,
-                                              const char* debug_name,
-                                              JumpOptimizationInfo* jump_opt);
+                                              const char* debug_name);
 
   // Run the entire pipeline and generate a handle to a code object suitable for
   // testing.

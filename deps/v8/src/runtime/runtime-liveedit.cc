@@ -27,7 +27,7 @@ RUNTIME_FUNCTION(Runtime_LiveEditFindSharedFunctionInfosForScript) {
   CHECK(script_value->value()->IsScript());
   Handle<Script> script = Handle<Script>(Script::cast(script_value->value()));
 
-  std::vector<Handle<SharedFunctionInfo>> found;
+  List<Handle<SharedFunctionInfo> > found;
   Heap* heap = isolate->heap();
   {
     HeapIterator iterator(heap);
@@ -36,13 +36,12 @@ RUNTIME_FUNCTION(Runtime_LiveEditFindSharedFunctionInfosForScript) {
       if (!heap_obj->IsSharedFunctionInfo()) continue;
       SharedFunctionInfo* shared = SharedFunctionInfo::cast(heap_obj);
       if (shared->script() != *script) continue;
-      found.push_back(Handle<SharedFunctionInfo>(shared));
+      found.Add(Handle<SharedFunctionInfo>(shared));
     }
   }
 
-  int found_size = static_cast<int>(found.size());
-  Handle<FixedArray> result = isolate->factory()->NewFixedArray(found_size);
-  for (int i = 0; i < found_size; ++i) {
+  Handle<FixedArray> result = isolate->factory()->NewFixedArray(found.length());
+  for (int i = 0; i < found.length(); ++i) {
     Handle<SharedFunctionInfo> shared = found[i];
     SharedInfoWrapper info_wrapper = SharedInfoWrapper::Create(isolate);
     Handle<String> name(shared->name(), isolate);

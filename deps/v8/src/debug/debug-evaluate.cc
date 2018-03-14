@@ -296,11 +296,9 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(ThrowSymbolIteratorInvalid)      \
   V(ThrowIteratorResultNotAnObject)  \
   V(NewTypeError)                    \
-  V(ThrowInvalidStringLength)        \
   /* Strings */                      \
   V(StringCharCodeAt)                \
   V(StringIndexOf)                   \
-  V(StringIncludes)                  \
   V(StringReplaceOneCharWithString)  \
   V(SubString)                       \
   V(RegExpInternalReplace)           \
@@ -309,7 +307,12 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(CreateObjectLiteral)             \
   V(CreateRegExpLiteral)             \
   /* Collections */                  \
+  V(JSCollectionGetTable)            \
+  V(FixedArrayGet)                   \
+  V(StringGetRawHashField)           \
   V(GenericHash)                     \
+  V(MapInitialize)                   \
+  V(SetInitialize)                   \
   /* Called from builtins */         \
   V(StringParseFloat)                \
   V(StringParseInt)                  \
@@ -318,6 +321,7 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(StringEqual)                     \
   V(SymbolDescriptiveString)         \
   V(GenerateRandomNumbers)           \
+  V(ExternalStringGetChar)           \
   V(GlobalPrint)                     \
   V(AllocateInNewSpace)              \
   V(AllocateSeqOneByteString)        \
@@ -338,8 +342,7 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(MaxSmi)                          \
   V(NewObject)                       \
   V(FinalizeInstanceSize)            \
-  V(HasInPrototypeChain)             \
-  V(StringMaxLength)
+  V(HasInPrototypeChain)
 
 #define CASE(Name)       \
   case Runtime::k##Name: \
@@ -410,9 +413,7 @@ bool BytecodeHasNoSideEffect(interpreter::Bytecode bytecode) {
     case Bytecode::kCreateWithContext:
     // Literals.
     case Bytecode::kCreateArrayLiteral:
-    case Bytecode::kCreateEmptyArrayLiteral:
     case Bytecode::kCreateObjectLiteral:
-    case Bytecode::kCreateEmptyObjectLiteral:
     case Bytecode::kCreateRegExpLiteral:
     // Allocations.
     case Bytecode::kCreateClosure:
@@ -436,7 +437,9 @@ bool BytecodeHasNoSideEffect(interpreter::Bytecode bytecode) {
     case Bytecode::kToObject:
     case Bytecode::kToNumber:
     case Bytecode::kToName:
+    case Bytecode::kToPrimitiveToString:
     // Misc.
+    case Bytecode::kStringConcat:
     case Bytecode::kForInPrepare:
     case Bytecode::kForInContinue:
     case Bytecode::kForInNext:
@@ -478,12 +481,12 @@ bool BuiltinHasNoSideEffect(Builtins::Name id) {
     case Builtins::kObjectIsSealed:
     case Builtins::kObjectPrototypeValueOf:
     case Builtins::kObjectValues:
-    case Builtins::kObjectPrototypeHasOwnProperty:
+    case Builtins::kObjectHasOwnProperty:
     case Builtins::kObjectPrototypeIsPrototypeOf:
     case Builtins::kObjectPrototypePropertyIsEnumerable:
-    case Builtins::kObjectPrototypeToString:
+    case Builtins::kObjectProtoToString:
     // Array builtins.
-    case Builtins::kArrayConstructor:
+    case Builtins::kArrayCode:
     case Builtins::kArrayIndexOf:
     case Builtins::kArrayPrototypeValues:
     case Builtins::kArrayIncludes:
@@ -596,7 +599,6 @@ bool BuiltinHasNoSideEffect(Builtins::Name id) {
     case Builtins::kStringConstructor:
     case Builtins::kStringPrototypeCharAt:
     case Builtins::kStringPrototypeCharCodeAt:
-    case Builtins::kStringPrototypeCodePointAt:
     case Builtins::kStringPrototypeConcat:
     case Builtins::kStringPrototypeEndsWith:
     case Builtins::kStringPrototypeIncludes:

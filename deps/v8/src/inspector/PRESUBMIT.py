@@ -20,8 +20,10 @@ def _CompileScripts(input_api, output_api):
     "js_protocol.json"
     "compile-scripts.js",
     "injected-script-source.js",
+    "debugger_script_externs.js",
     "injected_script_externs.js",
-    "check_injected_script_source.js"
+    "check_injected_script_source.js",
+    "debugger-script.js"
   ]
 
   for file in compilation_related_files:

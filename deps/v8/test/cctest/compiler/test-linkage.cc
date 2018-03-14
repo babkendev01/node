@@ -45,10 +45,9 @@ static Handle<JSFunction> Compile(const char* source) {
 TEST(TestLinkageCreate) {
   HandleAndZoneScope handles;
   Handle<JSFunction> function = Compile("a + b");
-  Handle<SharedFunctionInfo> shared(function->shared());
-  Handle<Script> script(Script::cast(shared->script()));
-  CompilationInfo info(handles.main_zone(), function->GetIsolate(), script,
-                       shared, function);
+  ParseInfo parse_info(handle(function->shared()));
+  CompilationInfo info(parse_info.zone(), &parse_info, function->GetIsolate(),
+                       function);
   CallDescriptor* descriptor = Linkage::ComputeIncoming(info.zone(), &info);
   CHECK(descriptor);
 }
@@ -63,10 +62,9 @@ TEST(TestLinkageJSFunctionIncoming) {
     Handle<JSFunction> function =
         Handle<JSFunction>::cast(v8::Utils::OpenHandle(
             *v8::Local<v8::Function>::Cast(CompileRun(sources[i]))));
-    Handle<SharedFunctionInfo> shared(function->shared());
-    Handle<Script> script(Script::cast(shared->script()));
-    CompilationInfo info(handles.main_zone(), function->GetIsolate(), script,
-                         shared, function);
+    ParseInfo parse_info(handle(function->shared()));
+    CompilationInfo info(parse_info.zone(), &parse_info, function->GetIsolate(),
+                         function);
     CallDescriptor* descriptor = Linkage::ComputeIncoming(info.zone(), &info);
     CHECK(descriptor);
 
@@ -81,10 +79,9 @@ TEST(TestLinkageJSFunctionIncoming) {
 TEST(TestLinkageJSCall) {
   HandleAndZoneScope handles;
   Handle<JSFunction> function = Compile("a + c");
-  Handle<SharedFunctionInfo> shared(function->shared());
-  Handle<Script> script(Script::cast(shared->script()));
-  CompilationInfo info(handles.main_zone(), function->GetIsolate(), script,
-                       shared, function);
+  ParseInfo parse_info(handle(function->shared()));
+  CompilationInfo info(parse_info.zone(), &parse_info, function->GetIsolate(),
+                       function);
 
   for (int i = 0; i < 32; i++) {
     CallDescriptor* descriptor = Linkage::GetJSCallDescriptor(

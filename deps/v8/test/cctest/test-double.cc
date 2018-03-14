@@ -34,8 +34,9 @@
 #include "src/double.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+
+using namespace v8::internal;
+
 
 TEST(Uint64Conversions) {
   // Start by checking the byte-order.
@@ -228,6 +229,3 @@ TEST(NextDouble) {
   CHECK_EQ(V8_INFINITY,
            Double(V8_2PART_UINT64_C(0x7fefffff, ffffffff)).NextDouble());
 }
-
-}  // namespace internal
-}  // namespace v8

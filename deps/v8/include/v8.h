@@ -139,7 +139,6 @@ template<typename T> class ReturnValue;
 
 namespace internal {
 class Arguments;
-class DeferredHandles;
 class Heap;
 class HeapObject;
 class Isolate;
@@ -1170,8 +1169,8 @@ class V8_EXPORT Module {
   V8_WARN_UNUSED_RESULT MaybeLocal<Value> Evaluate(Local<Context> context);
 
   /**
-   * Returns the namespace object of this module.
-   * The module's status must be kEvaluated.
+   * Returns the namespace object of this module. The module must have
+   * been successfully instantiated before and must not be errored.
    */
   Local<Value> GetModuleNamespace();
 };
@@ -1726,16 +1725,7 @@ class V8_EXPORT StackFrame {
 
 
 // A StateTag represents a possible state of the VM.
-enum StateTag {
-  JS,
-  GC,
-  COMPILER,
-  OTHER,
-  EXTERNAL,
-  IDLE,
-  PARSER,
-  BYTECODE_COMPILER
-};
+enum StateTag { JS, GC, COMPILER, OTHER, EXTERNAL, IDLE };
 
 // A RegisterState represents the current state of registers used
 // by the sampling profiler API.
@@ -2452,8 +2442,7 @@ enum class NewStringType {
  */
 class V8_EXPORT String : public Name {
  public:
-  static const int kMaxLength =
-      sizeof(void*) == 4 ? (1 << 28) - 16 : (1 << 30) - 1 - 24;
+  static const int kMaxLength = (1 << 28) - 16;
 
   enum Encoding {
     UNKNOWN_ENCODING = 0x1,
@@ -2772,9 +2761,7 @@ class V8_EXPORT String : public Name {
    */
   class V8_EXPORT Utf8Value {
    public:
-    V8_DEPRECATE_SOON("Use Isolate version",
-                      explicit Utf8Value(Local<v8::Value> obj));
-    Utf8Value(Isolate* isolate, Local<v8::Value> obj);
+    explicit Utf8Value(Local<v8::Value> obj);
     ~Utf8Value();
     char* operator*() { return str_; }
     const char* operator*() const { return str_; }
@@ -2797,9 +2784,7 @@ class V8_EXPORT String : public Name {
    */
   class V8_EXPORT Value {
    public:
-    V8_DEPRECATE_SOON("Use Isolate version",
-                      explicit Value(Local<v8::Value> obj));
-    Value(Isolate* isolate, Local<v8::Value> obj);
+    explicit Value(Local<v8::Value> obj);
     ~Value();
     uint16_t* operator*() { return str_; }
     const uint16_t* operator*() const { return str_; }
@@ -4122,7 +4107,9 @@ class V8_EXPORT WasmCompiledModule : public Object {
   // supports move semantics, and does not support copy semantics.
   class TransferrableModule final {
    public:
-    TransferrableModule(TransferrableModule&& src);
+    TransferrableModule(TransferrableModule&& src)
+        : compiled_code(std::move(src.compiled_code)),
+          wire_bytes(std::move(src.wire_bytes)) {}
     TransferrableModule(const TransferrableModule& src) = delete;
 
     TransferrableModule& operator=(TransferrableModule&& src);
@@ -4182,41 +4169,6 @@ class V8_EXPORT WasmCompiledModule : public Object {
   static void CheckCast(Value* obj);
 };
 
-// TODO(mtrofin): when streaming compilation is done, we can rename this
-// to simply WasmModuleObjectBuilder
-class V8_EXPORT WasmModuleObjectBuilderStreaming final {
- public:
-  WasmModuleObjectBuilderStreaming(Isolate* isolate);
-  // The buffer passed into OnBytesReceived is owned by the caller.
-  void OnBytesReceived(const uint8_t*, size_t size);
-  void Finish();
-  void Abort(Local<Value> exception);
-  Local<Promise> GetPromise();
-
-  ~WasmModuleObjectBuilderStreaming();
-
- private:
-  typedef std::pair<std::unique_ptr<const uint8_t[]>, size_t> Buffer;
-
-  WasmModuleObjectBuilderStreaming(const WasmModuleObjectBuilderStreaming&) =
-      delete;
-  WasmModuleObjectBuilderStreaming(WasmModuleObjectBuilderStreaming&&);
-  WasmModuleObjectBuilderStreaming& operator=(
-      const WasmModuleObjectBuilderStreaming&) = delete;
-  WasmModuleObjectBuilderStreaming& operator=(
-      WasmModuleObjectBuilderStreaming&&);
-  Isolate* isolate_ = nullptr;
-
-  // We don't need the static Copy API, so the default
-  // NonCopyablePersistentTraits would be sufficient, however,
-  // MSVC eagerly instantiates the Copy.
-  // We ensure we don't use Copy, however, by compiling with the
-  // defaults everywhere else.
-  Persistent<Promise, CopyablePersistentTraits<Promise>> promise_;
-  std::vector<Buffer> received_buffers_;
-  size_t total_size_ = 0;
-};
-
 class V8_EXPORT WasmModuleObjectBuilder final {
  public:
   WasmModuleObjectBuilder(Isolate* isolate) : isolate_(isolate) {}
@@ -4233,7 +4185,9 @@ class V8_EXPORT WasmModuleObjectBuilder final {
   // Disable copy semantics *in this implementation*. We can choose to
   // relax this, albeit it's not clear why.
   WasmModuleObjectBuilder(const WasmModuleObjectBuilder&) = delete;
-  WasmModuleObjectBuilder(WasmModuleObjectBuilder&&);
+  WasmModuleObjectBuilder(WasmModuleObjectBuilder&& src)
+      : received_buffers_(std::move(src.received_buffers_)),
+        total_size_(src.total_size_) {}
   WasmModuleObjectBuilder& operator=(const WasmModuleObjectBuilder&) = delete;
   WasmModuleObjectBuilder& operator=(WasmModuleObjectBuilder&&);
 
@@ -4494,12 +4448,6 @@ class V8_EXPORT ArrayBufferView : public Object {
  */
 class V8_EXPORT TypedArray : public ArrayBufferView {
  public:
-  /*
-   * The largest typed array size that can be constructed using New.
-   */
-  static const size_t kMaxLength =
-      sizeof(void*) == 4 ? (1u << 30) - 1 : (1u << 31) - 1;
-
   /**
    * Number of elements in this typed array
    * (e.g. for Int16Array, |ByteLength|/2).
@@ -5096,6 +5044,7 @@ typedef void (*NamedPropertyDeleterCallback)(
     Local<String> property,
     const PropertyCallbackInfo<Boolean>& info);
 
+
 /**
  * Returns an array containing the names of the properties the named
  * property getter intercepts.
@@ -5218,6 +5167,7 @@ typedef void (*GenericNamedPropertyQueryCallback)(
  */
 typedef void (*GenericNamedPropertyDeleterCallback)(
     Local<Name> property, const PropertyCallbackInfo<Boolean>& info);
+
 
 /**
  * Returns an array containing the names of the properties the named
@@ -6167,9 +6117,7 @@ typedef void (*DeprecatedCallCompletedCallback)();
  * The Promise returned from this function is forwarded to userland
  * JavaScript. The embedder must resolve this promise with the module
  * namespace object. In case of an exception, the embedder must reject
- * this promise with the exception. If the promise creation itself
- * fails (e.g. due to stack overflow), the embedder must propagate
- * that exception by returning an empty MaybeLocal.
+ * this promise with the exception.
  */
 typedef MaybeLocal<Promise> (*HostImportModuleDynamicallyCallback)(
     Local<Context> context, Local<String> referrer, Local<String> specifier);
@@ -6521,7 +6469,7 @@ struct JitCodeEvent {
   struct line_info_t {
     // PC offset
     size_t offset;
-    // Code position
+    // Code postion
     size_t pos;
     // The position type.
     PositionType position_type;
@@ -6800,7 +6748,7 @@ class V8_EXPORT Isolate {
      * deserialization. This array and its content must stay valid for the
      * entire lifetime of the isolate.
      */
-    const intptr_t* external_references;
+    intptr_t* external_references;
 
     /**
      * Whether calling Atomics.wait (a function that may block) is allowed in
@@ -6946,7 +6894,6 @@ class V8_EXPORT Isolate {
     kAssigmentExpressionLHSIsCallInStrict = 37,
     kPromiseConstructorReturnedUndefined = 38,
     kConstructorNonUndefinedPrimitiveReturn = 39,
-    kLabeledExpressionStatement = 40,
 
     // If you add new values here, you'll also need to update Chromium's:
     // UseCounter.h, V8PerIsolateData.cpp, histograms.xml
@@ -7381,8 +7328,8 @@ class V8_EXPORT Isolate {
           DeprecatedCallCompletedCallback callback));
 
   /**
-   * Set the PromiseHook callback for various promise lifecycle
-   * events.
+   * Experimental: Set the PromiseHook callback for various promise
+   * lifecycle events.
    */
   void SetPromiseHook(PromiseHook hook);
 
@@ -7738,7 +7685,7 @@ typedef bool (*EntropySource)(unsigned char* buffer, size_t length);
  * ReturnAddressLocationResolver is used as a callback function when v8 is
  * resolving the location of a return address on the stack. Profilers that
  * change the return address on the stack can use this to resolve the stack
- * location to wherever the profiler stashed the original return address.
+ * location to whereever the profiler stashed the original return address.
  *
  * \param return_addr_location A location on stack where a machine
  *    return address resides.
@@ -8165,7 +8112,7 @@ class V8_EXPORT SnapshotCreator {
    * \param external_references a null-terminated array of external references
    *        that must be equivalent to CreateParams::external_references.
    */
-  SnapshotCreator(const intptr_t* external_references = nullptr,
+  SnapshotCreator(intptr_t* external_references = nullptr,
                   StartupData* existing_blob = nullptr);
 
   ~SnapshotCreator();

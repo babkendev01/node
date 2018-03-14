@@ -15,7 +15,6 @@
 
 namespace v8 {
 namespace internal {
-namespace heap {
 
 namespace {
 
@@ -27,8 +26,6 @@ v8::Isolate* NewIsolateForPagePromotion(int min_semi_space_size = 8,
   FLAG_parallel_compaction = false;
   FLAG_page_promotion = true;
   FLAG_page_promotion_threshold = 0;
-  // Parallel scavenge introduces too much fragmentation.
-  FLAG_parallel_scavenge = false;
   FLAG_min_semi_space_size = min_semi_space_size;
   // We cannot optimize for size as we require a new space with more than one
   // page.
@@ -55,7 +52,6 @@ Page* FindLastPageInNewSpace(std::vector<Handle<FixedArray>>& handles) {
 UNINITIALIZED_TEST(PagePromotion_NewToOld) {
   if (!i::FLAG_incremental_marking) return;
   if (!i::FLAG_page_promotion) return;
-  ManualGCScope manual_gc_scope;
 
   v8::Isolate* isolate = NewIsolateForPagePromotion();
   i::Isolate* i_isolate = reinterpret_cast<i::Isolate*>(isolate);
@@ -77,8 +73,7 @@ UNINITIALIZED_TEST(PagePromotion_NewToOld) {
     // Sanity check that the page meets the requirements for promotion.
     const int threshold_bytes =
         FLAG_page_promotion_threshold * Page::kAllocatableMemory / 100;
-    CHECK_GE(heap->incremental_marking()->marking_state()->live_bytes(
-                 to_be_promoted_page),
+    CHECK_GE(MarkingState::Internal(to_be_promoted_page).live_bytes(),
              threshold_bytes);
 
     // Actual checks: The page is in new space first, but is moved to old space
@@ -199,6 +194,5 @@ UNINITIALIZED_HEAP_TEST(Regress658718) {
   isolate->Dispose();
 }
 
-}  // namespace heap
 }  // namespace internal
 }  // namespace v8

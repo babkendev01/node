@@ -23,6 +23,7 @@ InterpreterTester::InterpreterTester(
       source_(source),
       bytecode_(bytecode),
       feedback_metadata_(feedback_metadata) {
+  i::FLAG_stress_fullcodegen = false;
   i::FLAG_always_opt = false;
 }
 

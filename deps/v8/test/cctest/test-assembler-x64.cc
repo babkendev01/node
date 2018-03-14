@@ -39,8 +39,7 @@
 #include "src/ostreams.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
 
 // Test the x64 assembler by compiling some simple functions into
 // a buffer and executing them.  These tests do not initialize the
@@ -2539,6 +2538,3 @@ TEST(AssemblerX64vmovups) {
 }
 
 #undef __
-
-}  // namespace internal
-}  // namespace v8

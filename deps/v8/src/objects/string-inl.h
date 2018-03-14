@@ -8,7 +8,6 @@
 #include "src/objects/string.h"
 
 #include "src/conversions-inl.h"
-#include "src/factory.h"
 #include "src/objects/name-inl.h"
 #include "src/string-hasher-inl.h"
 
@@ -515,7 +514,7 @@ String* ConsString::second() {
 }
 
 Object* ConsString::unchecked_second() {
-  return RELAXED_READ_FIELD(this, kSecondOffset);
+  return READ_FIELD(this, kSecondOffset);
 }
 
 void ConsString::set_second(String* value, WriteBarrierMode mode) {

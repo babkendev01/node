@@ -14,7 +14,8 @@ namespace v8 {
 namespace internal {
 namespace compiler {
 
-const RegisterConfiguration* (*GetRegConfig)() = RegisterConfiguration::Default;
+const RegisterConfiguration* (*GetRegConfig)() =
+    RegisterConfiguration::Turbofan;
 
 FlagsCondition CommuteFlagsCondition(FlagsCondition condition) {
   switch (condition) {
@@ -895,7 +896,6 @@ static MachineRepresentation FilterRepresentation(MachineRepresentation rep) {
     case MachineRepresentation::kNone:
       break;
   }
-
   UNREACHABLE();
 }
 

@@ -15,8 +15,7 @@ namespace internal {
 namespace {
 
 struct PerThreadAssertKeyConstructTrait final {
-  static void Construct(void* key_arg) {
-    auto key = reinterpret_cast<base::Thread::LocalStorageKey*>(key_arg);
+  static void Construct(base::Thread::LocalStorageKey* key) {
     *key = base::Thread::CreateThreadLocalKey();
   }
 };

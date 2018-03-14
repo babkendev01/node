@@ -55,26 +55,22 @@ bool CanInlineFunction(Handle<SharedFunctionInfo> shared) {
   // Only choose user code for inlining.
   if (!shared->IsUserJavaScript()) return false;
 
-  // If there is no bytecode array, it is either not compiled or it is compiled
-  // with WebAssembly for the asm.js pipeline. In either case we don't want to
-  // inline.
-  if (!shared->HasBytecodeArray()) return false;
-
-  // Quick check on the size of the bytecode to avoid inlining large functions.
-  if (shared->bytecode_array()->length() > FLAG_max_inlined_bytecode_size) {
+  // Quick check on the size of the AST to avoid parsing large candidate.
+  if (shared->ast_node_count() > FLAG_max_inlined_nodes) {
     return false;
   }
 
+  // Avoid inlining across the boundary of asm.js code.
+  if (shared->asm_function()) return false;
   return true;
 }
 
 bool IsSmallInlineFunction(Handle<SharedFunctionInfo> shared) {
-  // Forcibly inline small functions.
   // Don't forcibly inline functions that weren't compiled yet.
-  if (shared->HasBytecodeArray() && shared->bytecode_array()->length() <=
-                                        FLAG_max_inlined_bytecode_size_small) {
-    return true;
-  }
+  if (shared->ast_node_count() == 0) return false;
+
+  // Forcibly inline small functions.
+  if (shared->ast_node_count() <= FLAG_max_inlined_nodes_small) return true;
   return false;
 }
 
@@ -105,10 +101,6 @@ Reduction JSInliningHeuristic::Reduce(Node* node) {
 
   // Functions marked with %SetForceInlineFlag are immediately inlined.
   bool can_inline = false, force_inline = true, small_inline = true;
-  candidate.total_size = 0;
-  Node* frame_state = NodeProperties::GetFrameStateInput(node);
-  FrameStateInfo const& frame_info = OpParameter<FrameStateInfo>(frame_state);
-  Handle<SharedFunctionInfo> frame_shared_info;
   for (int i = 0; i < candidate.num_functions; ++i) {
     Handle<SharedFunctionInfo> shared =
         candidate.functions[i].is_null()
@@ -118,24 +110,8 @@ Reduction JSInliningHeuristic::Reduce(Node* node) {
       force_inline = false;
     }
     candidate.can_inline_function[i] = CanInlineFunction(shared);
-    // Do not allow direct recursion i.e. f() -> f(). We still allow indirect
-    // recurion like f() -> g() -> f(). The indirect recursion is helpful in
-    // cases where f() is a small dispatch function that calls the appropriate
-    // function. In the case of direct recursion, we only have some static
-    // information for the first level of inlining and it may not be that useful
-    // to just inline one level in recursive calls. In some cases like tail
-    // recursion we may benefit from recursive inlining, if we have additional
-    // analysis that converts them to iterative implementations. Though it is
-    // not obvious if such an anlysis is needed.
-    if (frame_info.shared_info().ToHandle(&frame_shared_info) &&
-        *frame_shared_info == *shared) {
-      TRACE("Not considering call site #%d:%s, because of recursive inlining\n",
-            node->id(), node->op()->mnemonic());
-      candidate.can_inline_function[i] = false;
-    }
     if (candidate.can_inline_function[i]) {
       can_inline = true;
-      candidate.total_size += shared->bytecode_array()->length();
     }
     if (!IsSmallInlineFunction(shared)) {
       small_inline = false;
@@ -193,8 +169,7 @@ Reduction JSInliningHeuristic::Reduce(Node* node) {
 
   // Forcibly inline small functions here. In the case of polymorphic inlining
   // small_inline is set only when all functions are small.
-  if (small_inline &&
-      cumulative_count_ <= FLAG_max_inlined_bytecode_size_absolute) {
+  if (small_inline && cumulative_count_ <= FLAG_max_inlined_nodes_absolute) {
     TRACE("Inlining small function(s) at call site #%d:%s\n", node->id(),
           node->op()->mnemonic());
     return InlineCandidate(candidate, true);
@@ -214,20 +189,10 @@ void JSInliningHeuristic::Finalize() {
   // on things that aren't called very often.
   // TODO(bmeurer): Use std::priority_queue instead of std::set here.
   while (!candidates_.empty()) {
+    if (cumulative_count_ > FLAG_max_inlined_nodes_cumulative) return;
     auto i = candidates_.begin();
     Candidate candidate = *i;
     candidates_.erase(i);
-
-    // Make sure we have some extra budget left, so that any small functions
-    // exposed by this function would be given a chance to inline.
-    double size_of_candidate =
-        candidate.total_size * FLAG_reserve_inline_budget_scale_factor;
-    int total_size = cumulative_count_ + static_cast<int>(size_of_candidate);
-    if (total_size > FLAG_max_inlined_bytecode_size_cumulative) {
-      // Try if any smaller functions are available to inline.
-      continue;
-    }
-
     // Make sure we don't try to inline dead candidate nodes.
     if (!candidate.node->IsDead()) {
       Reduction const reduction = InlineCandidate(candidate, false);
@@ -247,7 +212,7 @@ Reduction JSInliningHeuristic::InlineCandidate(Candidate const& candidate,
             : handle(candidate.functions[0]->shared());
     Reduction const reduction = inliner_.ReduceJSCall(node);
     if (reduction.Changed()) {
-      cumulative_count_ += shared->bytecode_array()->length();
+      cumulative_count_ += shared->ast_node_count();
     }
     return reduction;
   }
@@ -331,13 +296,13 @@ Reduction JSInliningHeuristic::InlineCandidate(Candidate const& candidate,
     Node* node = calls[i];
     if (force_inline ||
         (candidate.can_inline_function[i] &&
-         cumulative_count_ < FLAG_max_inlined_bytecode_size_cumulative)) {
+         cumulative_count_ < FLAG_max_inlined_nodes_cumulative)) {
       Reduction const reduction = inliner_.ReduceJSCall(node);
       if (reduction.Changed()) {
         // Killing the call node is not strictly necessary, but it is safer to
         // make sure we do not resurrect the node.
         node->Kill();
-        cumulative_count_ += function->shared()->bytecode_array()->length();
+        cumulative_count_ += function->shared()->ast_node_count();
       }
     }
   }
@@ -378,7 +343,7 @@ void JSInliningHeuristic::PrintCandidates() {
           candidate.functions[i].is_null()
               ? candidate.shared_info
               : handle(candidate.functions[i]->shared());
-      PrintF("  - size:%d, name: %s\n", shared->bytecode_array()->length(),
+      PrintF("  - size:%d, name: %s\n", shared->ast_node_count(),
              shared->DebugName()->ToCString().get());
     }
   }

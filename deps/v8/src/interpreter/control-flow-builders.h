@@ -34,14 +34,13 @@ class V8_EXPORT_PRIVATE ControlFlowBuilder BASE_EMBEDDED {
 class V8_EXPORT_PRIVATE BreakableControlFlowBuilder
     : public ControlFlowBuilder {
  public:
-  BreakableControlFlowBuilder(BytecodeArrayBuilder* builder,
-                              BlockCoverageBuilder* block_coverage_builder,
-                              AstNode* node)
-      : ControlFlowBuilder(builder),
-        break_labels_(builder->zone()),
-        node_(node),
-        block_coverage_builder_(block_coverage_builder) {}
+  explicit BreakableControlFlowBuilder(BytecodeArrayBuilder* builder)
+      : ControlFlowBuilder(builder), break_labels_(builder->zone()) {}
   virtual ~BreakableControlFlowBuilder();
+
+  // This method should be called by the control flow owner before
+  // destruction to update sites that emit jumps for break.
+  void BindBreakTarget();
 
   // This method is called when visiting break statements in the AST.
   // Inserts a jump to an unbound label that is patched when the corresponding
@@ -59,9 +58,6 @@ class V8_EXPORT_PRIVATE BreakableControlFlowBuilder
   BytecodeLabels* break_labels() { return &break_labels_; }
 
   void set_needs_continuation_counter() { needs_continuation_counter_ = true; }
-  bool needs_continuation_counter() const {
-    return needs_continuation_counter_;
-  }
 
  protected:
   void EmitJump(BytecodeLabels* labels);
@@ -72,17 +68,12 @@ class V8_EXPORT_PRIVATE BreakableControlFlowBuilder
   void EmitJumpIfUndefined(BytecodeLabels* labels);
   void EmitJumpIfNull(BytecodeLabels* labels);
 
-  // Called from the destructor to update sites that emit jumps for break.
-  void BindBreakTarget();
-
   // Unbound labels that identify jumps for break statements in the code.
   BytecodeLabels break_labels_;
 
   // A continuation counter (for block coverage) is needed e.g. when
   // encountering a break statement.
-  AstNode* node_;
   bool needs_continuation_counter_ = false;
-  BlockCoverageBuilder* block_coverage_builder_;
 };
 
 
@@ -93,8 +84,16 @@ class V8_EXPORT_PRIVATE BlockBuilder final
   BlockBuilder(BytecodeArrayBuilder* builder,
                BlockCoverageBuilder* block_coverage_builder,
                BreakableStatement* statement)
-      : BreakableControlFlowBuilder(builder, block_coverage_builder,
-                                    statement) {}
+      : BreakableControlFlowBuilder(builder),
+        block_coverage_builder_(block_coverage_builder),
+        statement_(statement) {}
+
+  void EndBlock();
+
+ private:
+  BytecodeLabel block_end_;
+  BlockCoverageBuilder* block_coverage_builder_;
+  BreakableStatement* statement_;
 };
 
 
@@ -104,15 +103,18 @@ class V8_EXPORT_PRIVATE LoopBuilder final : public BreakableControlFlowBuilder {
  public:
   LoopBuilder(BytecodeArrayBuilder* builder,
               BlockCoverageBuilder* block_coverage_builder, AstNode* node)
-      : BreakableControlFlowBuilder(builder, block_coverage_builder, node),
+      : BreakableControlFlowBuilder(builder),
         continue_labels_(builder->zone()),
         generator_jump_table_location_(nullptr),
-        parent_generator_jump_table_(nullptr) {
+        parent_generator_jump_table_(nullptr),
+        block_coverage_builder_(block_coverage_builder) {
     if (block_coverage_builder_ != nullptr) {
-      set_needs_continuation_counter();
       block_coverage_body_slot_ =
           block_coverage_builder_->AllocateBlockCoverageSlot(
               node, SourceRangeKind::kBody);
+      block_coverage_continuation_slot_ =
+          block_coverage_builder_->AllocateBlockCoverageSlot(
+              node, SourceRangeKind::kContinuation);
     }
   }
   ~LoopBuilder();
@@ -146,6 +148,8 @@ class V8_EXPORT_PRIVATE LoopBuilder final : public BreakableControlFlowBuilder {
   BytecodeJumpTable* parent_generator_jump_table_;
 
   int block_coverage_body_slot_;
+  int block_coverage_continuation_slot_;
+  BlockCoverageBuilder* block_coverage_builder_;
 };
 
 
@@ -153,10 +157,8 @@ class V8_EXPORT_PRIVATE LoopBuilder final : public BreakableControlFlowBuilder {
 class V8_EXPORT_PRIVATE SwitchBuilder final
     : public BreakableControlFlowBuilder {
  public:
-  SwitchBuilder(BytecodeArrayBuilder* builder,
-                BlockCoverageBuilder* block_coverage_builder,
-                SwitchStatement* statement, int number_of_cases)
-      : BreakableControlFlowBuilder(builder, block_coverage_builder, statement),
+  explicit SwitchBuilder(BytecodeArrayBuilder* builder, int number_of_cases)
+      : BreakableControlFlowBuilder(builder),
         case_sites_(builder->zone()) {
     case_sites_.resize(number_of_cases);
   }
@@ -164,7 +166,7 @@ class V8_EXPORT_PRIVATE SwitchBuilder final
 
   // This method should be called by the SwitchBuilder owner when the case
   // statement with |index| is emitted to update the case jump site.
-  void SetCaseTarget(int index, CaseClause* clause);
+  void SetCaseTarget(int index);
 
   // This method is called when visiting case comparison operation for |index|.
   // Inserts a JumpIfTrue with ToBooleanMode |mode| to a unbound label that is
@@ -187,8 +189,8 @@ class V8_EXPORT_PRIVATE SwitchBuilder final
 // A class to help with co-ordinating control flow in try-catch statements.
 class V8_EXPORT_PRIVATE TryCatchBuilder final : public ControlFlowBuilder {
  public:
-  TryCatchBuilder(BytecodeArrayBuilder* builder,
-                  HandlerTable::CatchPrediction catch_prediction)
+  explicit TryCatchBuilder(BytecodeArrayBuilder* builder,
+                           HandlerTable::CatchPrediction catch_prediction)
       : ControlFlowBuilder(builder),
         handler_id_(builder->NewHandlerEntry()),
         catch_prediction_(catch_prediction) {}
@@ -208,8 +210,8 @@ class V8_EXPORT_PRIVATE TryCatchBuilder final : public ControlFlowBuilder {
 // A class to help with co-ordinating control flow in try-finally statements.
 class V8_EXPORT_PRIVATE TryFinallyBuilder final : public ControlFlowBuilder {
  public:
-  TryFinallyBuilder(BytecodeArrayBuilder* builder,
-                    HandlerTable::CatchPrediction catch_prediction)
+  explicit TryFinallyBuilder(BytecodeArrayBuilder* builder,
+                             HandlerTable::CatchPrediction catch_prediction)
       : ControlFlowBuilder(builder),
         handler_id_(builder->NewHandlerEntry()),
         catch_prediction_(catch_prediction),
@@ -229,49 +231,6 @@ class V8_EXPORT_PRIVATE TryFinallyBuilder final : public ControlFlowBuilder {
 
   // Unbound labels that identify jumps to the finally block in the code.
   BytecodeLabels finalization_sites_;
-};
-
-class V8_EXPORT_PRIVATE ConditionalControlFlowBuilder final
-    : public ControlFlowBuilder {
- public:
-  ConditionalControlFlowBuilder(BytecodeArrayBuilder* builder,
-                                BlockCoverageBuilder* block_coverage_builder,
-                                AstNode* node)
-      : ControlFlowBuilder(builder),
-        end_labels_(builder->zone()),
-        then_labels_(builder->zone()),
-        else_labels_(builder->zone()),
-        node_(node),
-        block_coverage_builder_(block_coverage_builder) {
-    DCHECK(node->IsIfStatement() || node->IsConditional());
-    if (block_coverage_builder != nullptr) {
-      block_coverage_then_slot_ =
-          block_coverage_builder->AllocateBlockCoverageSlot(
-              node, SourceRangeKind::kThen);
-      block_coverage_else_slot_ =
-          block_coverage_builder->AllocateBlockCoverageSlot(
-              node, SourceRangeKind::kElse);
-    }
-  }
-  ~ConditionalControlFlowBuilder();
-
-  BytecodeLabels* then_labels() { return &then_labels_; }
-  BytecodeLabels* else_labels() { return &else_labels_; }
-
-  void Then();
-  void Else();
-
-  void JumpToEnd();
-
- private:
-  BytecodeLabels end_labels_;
-  BytecodeLabels then_labels_;
-  BytecodeLabels else_labels_;
-
-  AstNode* node_;
-  int block_coverage_then_slot_;
-  int block_coverage_else_slot_;
-  BlockCoverageBuilder* block_coverage_builder_;
 };
 
 }  // namespace interpreter

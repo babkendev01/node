@@ -228,7 +228,6 @@ namespace compiler {
   V(ArmI8x16GtU)                   \
   V(ArmI8x16GeU)                   \
   V(ArmS128Zero)                   \
-  V(ArmS128Dup)                    \
   V(ArmS128And)                    \
   V(ArmS128Or)                     \
   V(ArmS128Xor)                    \

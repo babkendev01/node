@@ -504,17 +504,16 @@ class ArrayConcatVisitor {
     return array;
   }
 
-  MUST_USE_RESULT MaybeHandle<JSReceiver> ToJSReceiver() {
+  // Storage is either a FixedArray (if is_fixed_array()) or a JSReciever
+  // (otherwise)
+  Handle<FixedArray> storage_fixed_array() {
+    DCHECK(is_fixed_array());
+    DCHECK(has_simple_elements());
+    return Handle<FixedArray>::cast(storage_);
+  }
+  Handle<JSReceiver> storage_jsreceiver() {
     DCHECK(!is_fixed_array());
-    Handle<JSReceiver> result = Handle<JSReceiver>::cast(storage_);
-    Handle<Object> length =
-        isolate_->factory()->NewNumber(static_cast<double>(index_offset_));
-    RETURN_ON_EXCEPTION(
-        isolate_,
-        JSReceiver::SetProperty(result, isolate_->factory()->length_string(),
-                                length, STRICT),
-        JSReceiver);
-    return result;
+    return Handle<JSReceiver>::cast(storage_);
   }
   bool has_simple_elements() const {
     return HasSimpleElementsField::decode(bit_field_);
@@ -569,11 +568,6 @@ class ArrayConcatVisitor {
     bit_field_ = ExceedsLimitField::update(bit_field_, exceeds);
   }
   bool is_fixed_array() const { return IsFixedArrayField::decode(bit_field_); }
-  Handle<FixedArray> storage_fixed_array() {
-    DCHECK(is_fixed_array());
-    DCHECK(has_simple_elements());
-    return Handle<FixedArray>::cast(storage_);
-  }
 
   Isolate* isolate_;
   Handle<Object> storage_;  // Always a global handle.
@@ -651,8 +645,15 @@ uint32_t EstimateElementCount(Handle<JSArray> array) {
   return element_count;
 }
 
+// Used for sorting indices in a List<uint32_t>.
+int compareUInt32(const uint32_t* ap, const uint32_t* bp) {
+  uint32_t a = *ap;
+  uint32_t b = *bp;
+  return (a == b) ? 0 : (a < b) ? -1 : 1;
+}
+
 void CollectElementIndices(Handle<JSObject> object, uint32_t range,
-                           std::vector<uint32_t>* indices) {
+                           List<uint32_t>* indices) {
   Isolate* isolate = object->GetIsolate();
   ElementsKind kind = object->GetElementsKind();
   switch (kind) {
@@ -666,7 +667,7 @@ void CollectElementIndices(Handle<JSObject> object, uint32_t range,
       if (range < length) length = range;
       for (uint32_t i = 0; i < length; i++) {
         if (!elements->get(i)->IsTheHole(isolate)) {
-          indices->push_back(i);
+          indices->Add(i);
         }
       }
       break;
@@ -683,7 +684,7 @@ void CollectElementIndices(Handle<JSObject> object, uint32_t range,
       if (range < length) length = range;
       for (uint32_t i = 0; i < length; i++) {
         if (!elements->is_the_hole(i)) {
-          indices->push_back(i);
+          indices->Add(i);
         }
       }
       break;
@@ -699,7 +700,7 @@ void CollectElementIndices(Handle<JSObject> object, uint32_t range,
         DCHECK(k->IsNumber());
         uint32_t index = static_cast<uint32_t>(k->Number());
         if (index < range) {
-          indices->push_back(index);
+          indices->Add(index);
         }
       });
       break;
@@ -715,10 +716,10 @@ void CollectElementIndices(Handle<JSObject> object, uint32_t range,
           length = range;
           // We will add all indices, so we might as well clear it first
           // and avoid duplicates.
-          indices->clear();
+          indices->Clear();
         }
         for (uint32_t i = 0; i < length; i++) {
-          indices->push_back(i);
+          indices->Add(i);
         }
         if (length == range) return;  // All indices accounted for already.
         break;
@@ -731,7 +732,7 @@ void CollectElementIndices(Handle<JSObject> object, uint32_t range,
       ElementsAccessor* accessor = object->GetElementsAccessor();
       for (uint32_t i = 0; i < range; i++) {
         if (accessor->HasElement(raw_object, i, elements)) {
-          indices->push_back(i);
+          indices->Add(i);
         }
       }
       break;
@@ -746,12 +747,12 @@ void CollectElementIndices(Handle<JSObject> object, uint32_t range,
       uint32_t i = 0;
       uint32_t limit = Min(length, range);
       for (; i < limit; i++) {
-        indices->push_back(i);
+        indices->Add(i);
       }
       ElementsAccessor* accessor = object->GetElementsAccessor();
       for (; i < range; i++) {
         if (accessor->HasElement(*object, i)) {
-          indices->push_back(i);
+          indices->Add(i);
         }
       }
       break;
@@ -888,15 +889,13 @@ bool IterateElements(Isolate* isolate, Handle<JSReceiver> receiver,
 
     case DICTIONARY_ELEMENTS: {
       Handle<SeededNumberDictionary> dict(array->element_dictionary());
-      std::vector<uint32_t> indices;
-      indices.reserve(dict->Capacity() / 2);
-
+      List<uint32_t> indices(dict->Capacity() / 2);
       // Collect all indices in the object and the prototypes less
       // than length. This might introduce duplicates in the indices list.
       CollectElementIndices(array, length, &indices);
-      std::sort(indices.begin(), indices.end());
-      size_t n = indices.size();
-      FOR_WITH_HANDLE_SCOPE(isolate, size_t, j = 0, j, j < n, (void)0, {
+      indices.Sort(&compareUInt32);
+      int n = indices.length();
+      FOR_WITH_HANDLE_SCOPE(isolate, int, j = 0, j, j < n, (void)0, {
         uint32_t index = indices[j];
         Handle<Object> element;
         ASSIGN_RETURN_ON_EXCEPTION_VALUE(
@@ -1130,7 +1129,7 @@ Object* Slow_ArrayConcat(BuiltinArguments* args, Handle<Object> species,
   if (is_array_species) {
     return *visitor.ToArray();
   } else {
-    RETURN_RESULT_OR_FAILURE(isolate, visitor.ToJSReceiver());
+    return *visitor.storage_jsreceiver();
   }
 }
 

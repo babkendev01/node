@@ -39,7 +39,6 @@ class V8_EXPORT_PRIVATE Location {
  private:
   int line_number_;
   int column_number_;
-  bool is_empty_;
 };
 
 /**
@@ -170,8 +169,6 @@ class ConsoleDelegate {
                          const ConsoleContext& context) {}
   virtual ~ConsoleDelegate() = default;
 };
-
-typedef int BreakpointId;
 
 }  // namespace debug
 }  // namespace v8

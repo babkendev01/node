@@ -12,8 +12,7 @@
 #include "src/unicode-cache.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
 
 namespace {
 
@@ -130,6 +129,3 @@ TEST(ContextualKeywordTokens) {
   CHECK_TOK(Token::IDENTIFIER, scanner->current_token());
   CHECK_TOK(Token::UNINITIALIZED, scanner->current_contextual_token());
 }
-
-}  // namespace internal
-}  // namespace v8

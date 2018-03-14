@@ -37,8 +37,8 @@
 #include "src/feedback-vector-inl.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 static void SetUpNewSpaceWithPoisonedMementoAtTop() {
   Isolate* isolate = CcTest::i_isolate();
@@ -104,6 +104,3 @@ TEST(BadMementoAfterTopForceScavenge) {
   // Force GC to test the poisoned memento handling
   CcTest::CollectGarbage(i::NEW_SPACE);
 }
-
-}  // namespace internal
-}  // namespace v8

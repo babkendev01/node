@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "src/base/macros.h"
 #include "src/counters.h"
 #include "src/heap/incremental-marking.h"
 #include "src/isolate.h"
@@ -17,7 +16,11 @@ namespace v8 {
 namespace internal {
 
 StoreBuffer::StoreBuffer(Heap* heap)
-    : heap_(heap), top_(nullptr), current_(0), mode_(NOT_IN_GC) {
+    : heap_(heap),
+      top_(nullptr),
+      current_(0),
+      mode_(NOT_IN_GC),
+      virtual_memory_(nullptr) {
   for (int i = 0; i < kStoreBuffers; i++) {
     start_[i] = nullptr;
     limit_[i] = nullptr;
@@ -32,43 +35,41 @@ void StoreBuffer::SetUp() {
   // Allocate 3x the buffer size, so that we can start the new store buffer
   // aligned to 2x the size.  This lets us use a bit test to detect the end of
   // the area.
-  base::VirtualMemory reservation;
-  if (!AllocVirtualMemory(kStoreBufferSize * 3, heap_->GetRandomMmapAddr(),
-                          &reservation)) {
-    V8::FatalProcessOutOfMemory("StoreBuffer::SetUp");
-  }
-  uintptr_t start_as_int = reinterpret_cast<uintptr_t>(reservation.address());
+  virtual_memory_ =
+      new base::VirtualMemory(kStoreBufferSize * 3, heap_->GetRandomMmapAddr());
+  uintptr_t start_as_int =
+      reinterpret_cast<uintptr_t>(virtual_memory_->address());
   start_[0] =
-      reinterpret_cast<Address*>(::RoundUp(start_as_int, kStoreBufferSize));
+      reinterpret_cast<Address*>(RoundUp(start_as_int, kStoreBufferSize));
   limit_[0] = start_[0] + (kStoreBufferSize / kPointerSize);
   start_[1] = limit_[0];
   limit_[1] = start_[1] + (kStoreBufferSize / kPointerSize);
 
   Address* vm_limit = reinterpret_cast<Address*>(
-      reinterpret_cast<char*>(reservation.address()) + reservation.size());
+      reinterpret_cast<char*>(virtual_memory_->address()) +
+      virtual_memory_->size());
 
   USE(vm_limit);
   for (int i = 0; i < kStoreBuffers; i++) {
-    DCHECK(reinterpret_cast<Address>(start_[i]) >= reservation.address());
-    DCHECK(reinterpret_cast<Address>(limit_[i]) >= reservation.address());
+    DCHECK(reinterpret_cast<Address>(start_[i]) >= virtual_memory_->address());
+    DCHECK(reinterpret_cast<Address>(limit_[i]) >= virtual_memory_->address());
     DCHECK(start_[i] <= vm_limit);
     DCHECK(limit_[i] <= vm_limit);
     DCHECK((reinterpret_cast<uintptr_t>(limit_[i]) & kStoreBufferMask) == 0);
   }
 
-  if (!reservation.Commit(reinterpret_cast<Address>(start_[0]),
-                          kStoreBufferSize * kStoreBuffers,
-                          false)) {  // Not executable.
+  if (!virtual_memory_->Commit(reinterpret_cast<Address>(start_[0]),
+                               kStoreBufferSize * kStoreBuffers,
+                               false)) {  // Not executable.
     V8::FatalProcessOutOfMemory("StoreBuffer::SetUp");
   }
   current_ = 0;
   top_ = start_[current_];
-  virtual_memory_.TakeControl(&reservation);
 }
 
 
 void StoreBuffer::TearDown() {
-  if (virtual_memory_.IsReserved()) virtual_memory_.Release();
+  delete virtual_memory_;
   top_ = nullptr;
   for (int i = 0; i < kStoreBuffers; i++) {
     start_[i] = nullptr;
@@ -77,11 +78,10 @@ void StoreBuffer::TearDown() {
   }
 }
 
-int StoreBuffer::StoreBufferOverflow(Isolate* isolate) {
+
+void StoreBuffer::StoreBufferOverflow(Isolate* isolate) {
   isolate->heap()->store_buffer()->FlipStoreBuffers();
   isolate->counters()->store_buffer_overflows()->Increment();
-  // Called by RecordWriteCodeStubAssembler, which doesnt accept void type
-  return 0;
 }
 
 void StoreBuffer::FlipStoreBuffers() {
@@ -104,13 +104,11 @@ void StoreBuffer::MoveEntriesToRememberedSet(int index) {
   if (!lazy_top_[index]) return;
   DCHECK_GE(index, 0);
   DCHECK_LT(index, kStoreBuffers);
-  Address last_inserted_addr = nullptr;
   for (Address* current = start_[index]; current < lazy_top_[index];
        current++) {
     Address addr = *current;
     Page* page = Page::FromAnyPointerAddress(heap_, addr);
     if (IsDeletionAddress(addr)) {
-      last_inserted_addr = nullptr;
       current++;
       Address end = *current;
       DCHECK(!IsDeletionAddress(end));
@@ -123,10 +121,7 @@ void StoreBuffer::MoveEntriesToRememberedSet(int index) {
       }
     } else {
       DCHECK(!IsDeletionAddress(addr));
-      if (addr != last_inserted_addr) {
-        RememberedSet<OLD_TO_NEW>::Insert(page, addr);
-        last_inserted_addr = addr;
-      }
+      RememberedSet<OLD_TO_NEW>::Insert(page, addr);
     }
   }
   lazy_top_[index] = nullptr;

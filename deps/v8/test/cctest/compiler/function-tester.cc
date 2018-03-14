@@ -10,9 +10,11 @@
 #include "src/compiler/linkage.h"
 #include "src/compiler/pipeline.h"
 #include "src/execution.h"
+#include "src/full-codegen/full-codegen.h"
 #include "src/handles.h"
 #include "src/objects-inl.h"
 #include "src/parsing/parse-info.h"
+#include "src/parsing/parsing.h"
 #include "test/cctest/cctest.h"
 
 namespace v8 {
@@ -137,18 +139,22 @@ Handle<JSFunction> FunctionTester::ForMachineGraph(Graph* graph,
 }
 
 Handle<JSFunction> FunctionTester::Compile(Handle<JSFunction> function) {
-  Handle<SharedFunctionInfo> shared(function->shared());
-  ParseInfo parse_info(shared);
-  CompilationInfo info(parse_info.zone(), function->GetIsolate(),
-                       parse_info.script(), shared, function);
+  ParseInfo parse_info(handle(function->shared()));
+  CompilationInfo info(parse_info.zone(), &parse_info, function->GetIsolate(),
+                       function);
 
+  info.SetOptimizing();
   if (flags_ & CompilationInfo::kInliningEnabled) {
     info.MarkAsInliningEnabled();
   }
 
-  CHECK(function->is_compiled() ||
-        Compiler::Compile(function, Compiler::CLEAR_EXCEPTION));
-  CHECK(info.shared_info()->HasBytecodeArray());
+  CHECK(Compiler::Compile(function, Compiler::CLEAR_EXCEPTION));
+  if (info.shared_info()->HasBytecodeArray()) {
+    info.MarkAsDeoptimizationEnabled();
+    info.MarkAsOptimizeFromBytecode();
+  } else {
+    CHECK(Compiler::ParseAndAnalyze(&info));
+  }
   JSFunction::EnsureLiterals(function);
 
   Handle<Code> code = Pipeline::GenerateCodeForTesting(&info);
@@ -162,10 +168,12 @@ Handle<JSFunction> FunctionTester::Compile(Handle<JSFunction> function) {
 // Compile the given machine graph instead of the source of the function
 // and replace the JSFunction's code with the result.
 Handle<JSFunction> FunctionTester::CompileGraph(Graph* graph) {
-  Handle<SharedFunctionInfo> shared(function->shared());
-  ParseInfo parse_info(shared);
-  CompilationInfo info(parse_info.zone(), function->GetIsolate(),
-                       parse_info.script(), shared, function);
+  ParseInfo parse_info(handle(function->shared()));
+  CompilationInfo info(parse_info.zone(), &parse_info, function->GetIsolate(),
+                       function);
+
+  CHECK(parsing::ParseFunction(info.parse_info(), info.isolate()));
+  info.SetOptimizing();
 
   Handle<Code> code = Pipeline::GenerateCodeForTesting(&info, graph);
   CHECK(!code.is_null());

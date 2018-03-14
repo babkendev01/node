@@ -1,7 +1,5 @@
 Tests that Runtime.callFunctionOn works with awaitPromise flag.
 
-Running test: prepareTestSuite
-
 Running test: testArguments
 {
     id : <messageId>
@@ -9,17 +7,6 @@ Running test: testArguments
         result : {
             type : string
             value : undefined|NaN|[object Object]|[object Object]
-        }
-    }
-}
-
-Running test: testComplexArguments
-{
-    id : <messageId>
-    result : {
-        result : {
-            type : string
-            value : bar
         }
     }
 }
@@ -82,14 +69,8 @@ Running test: testExceptionInFunctionExpression
 
 Running test: testFunctionReturnNotPromise
 {
-    id : <messageId>
-    result : {
-        result : {
-            description : 239
-            type : number
-            value : 239
-        }
-    }
+    code : -32000
+    message : Result of the function call is not a promise
 }
 
 Running test: testFunctionReturnResolvedPromiseReturnByValue

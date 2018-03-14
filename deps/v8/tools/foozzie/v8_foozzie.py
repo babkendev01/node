@@ -20,13 +20,10 @@ import v8_commands
 import v8_suppressions
 
 CONFIGS = dict(
-  default=[
-    '--suppress-asm-messages',
-  ],
+  default=[],
   ignition=[
     '--turbo-filter=~',
     '--noopt',
-    '--suppress-asm-messages',
   ],
   ignition_asm=[
     '--turbo-filter=~',
@@ -40,20 +37,15 @@ CONFIGS = dict(
     '--noopt',
     '--no-lazy',
     '--no-lazy-inner-functions',
-    '--suppress-asm-messages',
   ],
-  ignition_turbo=[
-    '--suppress-asm-messages',
-  ],
+  ignition_turbo=[],
   ignition_turbo_opt=[
     '--always-opt',
-    '--suppress-asm-messages',
   ],
   ignition_turbo_opt_eager=[
     '--always-opt',
     '--no-lazy',
     '--no-lazy-inner-functions',
-    '--suppress-asm-messages',
   ],
 )
 
@@ -71,9 +63,8 @@ PREAMBLE = [
 ]
 ARCH_MOCKS = os.path.join(BASE_PATH, 'v8_mock_archs.js')
 
-FLAGS = ['--abort_on_stack_or_string_length_overflow', '--expose-gc',
-         '--allow-natives-syntax', '--invoke-weak-callbacks', '--omit-quit',
-         '--es-staging']
+FLAGS = ['--abort_on_stack_overflow', '--expose-gc', '--allow-natives-syntax',
+         '--invoke-weak-callbacks', '--omit-quit', '--es-staging']
 
 SUPPORTED_ARCHS = ['ia32', 'x64', 'arm', 'arm64']
 
@@ -127,7 +118,7 @@ def infer_arch(d8):
   executable.
   """
   with open(os.path.join(os.path.dirname(d8), 'v8_build_config.json')) as f:
-    arch = json.load(f)['v8_target_cpu']
+    arch = json.load(f)['v8_current_cpu']
   return 'ia32' if arch == 'x86' else arch
 
 

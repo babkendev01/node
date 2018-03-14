@@ -38,8 +38,7 @@ class V8ProfilerAgentImpl : public protocol::Profiler::Backend {
   Response start() override;
   Response stop(std::unique_ptr<protocol::Profiler::Profile>*) override;
 
-  Response startPreciseCoverage(Maybe<bool> binary,
-                                Maybe<bool> detailed) override;
+  Response startPreciseCoverage(Maybe<bool> binary) override;
   Response stopPreciseCoverage() override;
   Response takePreciseCoverage(
       std::unique_ptr<protocol::Array<protocol::Profiler::ScriptCoverage>>*

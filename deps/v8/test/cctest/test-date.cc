@@ -31,8 +31,7 @@
 #include "src/v8.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
 
 class DateCacheMock: public DateCache {
  public:
@@ -217,6 +216,3 @@ TEST(DateCacheVersion) {
   CHECK_EQ(1.0, date_cache_version->NumberValue(context).FromMaybe(-1.0));
 }
 #endif  // V8_INTL_SUPPORT
-
-}  // namespace internal
-}  // namespace v8

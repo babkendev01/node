@@ -3,11 +3,26 @@
 // found in the LICENSE file.
 
 // Flags: --allow-natives-syntax --no-always-opt
-// Files: test/mjsunit/code-coverage-utils.js
 
 // Test code coverage without explicitly activating it upfront.
 
-TestCoverageNoGC(
+function GetCoverage(source) {
+  for (var script of %DebugCollectCoverage()) {
+    if (script.script.source == source) return script;
+  }
+  return undefined;
+}
+
+function TestCoverage(name, source, expectation) {
+  source = source.trim();
+  eval(source);
+  var coverage = GetCoverage(source);
+  var result = JSON.stringify(coverage);
+  print(result);
+  assertEquals(JSON.stringify(expectation), result, name + " failed");
+}
+
+TestCoverage(
 "call simple function twice",
 `
 function f() {}
@@ -18,7 +33,7 @@ f();
  {"start":0,"end":15,"count":1}]
 );
 
-TestCoverageNoGC(
+TestCoverage(
 "call arrow function twice",
 `
 var f = () => 1;
@@ -29,7 +44,7 @@ f();
  {"start":8,"end":15,"count":1}]
 );
 
-TestCoverageNoGC(
+TestCoverage(
 "call nested function",
 `
 function f() {
@@ -45,7 +60,7 @@ f();
  {"start":17,"end":32,"count":1}]
 );
 
-TestCoverageNoGC(
+TestCoverage(
 "call recursive function",
 `
 function fib(x) {

@@ -68,8 +68,6 @@ class GenericStringUtf16CharacterStream : public BufferedUtf16CharacterStream {
   GenericStringUtf16CharacterStream(Handle<String> data, size_t start_position,
                                     size_t end_position);
 
-  bool can_access_heap() override { return true; }
-
  protected:
   size_t FillBuffer(size_t position) override;
 
@@ -106,8 +104,6 @@ class ExternalTwoByteStringUtf16CharacterStream : public Utf16CharacterStream {
   ExternalTwoByteStringUtf16CharacterStream(Handle<ExternalTwoByteString> data,
                                             size_t start_position,
                                             size_t end_position);
-
-  bool can_access_heap() override { return false; }
 
  private:
   bool ReadBlock() override;
@@ -160,8 +156,6 @@ class ExternalOneByteStringUtf16CharacterStream
   // For testing:
   ExternalOneByteStringUtf16CharacterStream(const char* data, size_t length);
 
-  bool can_access_heap() override { return false; }
-
  protected:
   size_t FillBuffer(size_t position) override;
 
@@ -209,8 +203,6 @@ class Utf8ExternalStreamingStream : public BufferedUtf16CharacterStream {
   ~Utf8ExternalStreamingStream() override {
     for (size_t i = 0; i < chunks_.size(); i++) delete[] chunks_[i].data;
   }
-
-  bool can_access_heap() override { return false; }
 
  protected:
   size_t FillBuffer(size_t position) override;
@@ -542,8 +534,6 @@ class OneByteExternalStreamingStream : public BufferedUtf16CharacterStream {
       : source_(source), stats_(stats) {}
   ~OneByteExternalStreamingStream() override { DeleteChunks(chunks_); }
 
-  bool can_access_heap() override { return false; }
-
  protected:
   size_t FillBuffer(size_t position) override;
 
@@ -577,8 +567,6 @@ class TwoByteExternalStreamingStream : public Utf16CharacterStream {
   explicit TwoByteExternalStreamingStream(
       ScriptCompiler::ExternalSourceStream* source, RuntimeCallStats* stats);
   ~TwoByteExternalStreamingStream() override;
-
-  bool can_access_heap() override { return false; }
 
  protected:
   bool ReadBlock() override;
@@ -677,8 +665,6 @@ class TwoByteExternalBufferedStream : public Utf16CharacterStream {
   explicit TwoByteExternalBufferedStream(
       ScriptCompiler::ExternalSourceStream* source, RuntimeCallStats* stats);
   ~TwoByteExternalBufferedStream();
-
-  bool can_access_heap() override { return false; }
 
  protected:
   static const size_t kBufferSize = 512;

@@ -12,6 +12,7 @@
 #include "src/compiler.h"
 #include "src/deoptimizer.h"
 #include "src/frames-inl.h"
+#include "src/full-codegen/full-codegen.h"
 #include "src/isolate-inl.h"
 #include "src/runtime-profiler.h"
 #include "src/snapshot/code-serializer.h"
@@ -232,7 +233,7 @@ RUNTIME_FUNCTION(Runtime_OptimizeFunctionOnNextCall) {
   }
 
   // If the function is already optimized, just return.
-  if (function->IsOptimized() || function->shared()->HasAsmWasmData()) {
+  if (function->IsOptimized()) {
     return isolate->heap()->undefined_value();
   }
 
@@ -314,14 +315,10 @@ RUNTIME_FUNCTION(Runtime_OptimizeOsr) {
 RUNTIME_FUNCTION(Runtime_NeverOptimizeFunction) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
-  // This function is used by fuzzers to get coverage for optimizations
-  // in compiler. Ignore calls on non-function objects to avoid runtime errors.
-  CONVERT_ARG_HANDLE_CHECKED(Object, function_object, 0);
-  if (!function_object->IsJSFunction()) {
-    return isolate->heap()->undefined_value();
-  }
-  Handle<JSFunction> function = Handle<JSFunction>::cast(function_object);
-  function->shared()->DisableOptimization(kOptimizationDisabledForTest);
+  CONVERT_ARG_CHECKED(JSFunction, function, 0);
+  function->shared()->set_disable_optimization_reason(
+      kOptimizationDisabledForTest);
+  function->shared()->set_optimization_disabled(true);
   return isolate->heap()->undefined_value();
 }
 
@@ -365,16 +362,6 @@ RUNTIME_FUNCTION(Runtime_GetOptimizationStatus) {
       base::OS::Sleep(base::TimeDelta::FromMilliseconds(50));
     }
   }
-
-  if (function->IsMarkedForOptimization()) {
-    status |= static_cast<int>(OptimizationStatus::kMarkedForOptimization);
-  } else if (function->IsInOptimizationQueue()) {
-    status |=
-        static_cast<int>(OptimizationStatus::kMarkedForConcurrentOptimization);
-  } else if (function->IsInOptimizationQueue()) {
-    status |= static_cast<int>(OptimizationStatus::kOptimizingConcurrently);
-  }
-
   if (function->IsOptimized()) {
     status |= static_cast<int>(OptimizationStatus::kOptimized);
     if (function->code()->is_turbofanned()) {
@@ -384,28 +371,9 @@ RUNTIME_FUNCTION(Runtime_GetOptimizationStatus) {
   if (function->IsInterpreted()) {
     status |= static_cast<int>(OptimizationStatus::kInterpreted);
   }
-
-  // Additionally, detect activations of this frame on the stack, and report the
-  // status of the topmost frame.
-  JavaScriptFrame* frame = nullptr;
-  JavaScriptFrameIterator it(isolate);
-  while (!it.done()) {
-    if (it.frame()->function() == *function) {
-      frame = it.frame();
-      break;
-    }
-    it.Advance();
-  }
-  if (frame != nullptr) {
-    status |= static_cast<int>(OptimizationStatus::kIsExecuting);
-    if (frame->is_optimized()) {
-      status |=
-          static_cast<int>(OptimizationStatus::kTopmostFrameIsTurboFanned);
-    }
-  }
-
   return Smi::FromInt(status);
 }
+
 
 RUNTIME_FUNCTION(Runtime_UnblockConcurrentRecompilation) {
   DCHECK_EQ(0, args.length());
@@ -416,13 +384,19 @@ RUNTIME_FUNCTION(Runtime_UnblockConcurrentRecompilation) {
   return isolate->heap()->undefined_value();
 }
 
+
+RUNTIME_FUNCTION(Runtime_GetOptimizationCount) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+  return Smi::FromInt(function->shared()->opt_count());
+}
+
 RUNTIME_FUNCTION(Runtime_GetDeoptCount) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
-  // Functions without a feedback vector have never deoptimized.
-  if (!function->has_feedback_vector()) return Smi::kZero;
-  return Smi::FromInt(function->feedback_vector()->deopt_count());
+  return Smi::FromInt(function->shared()->deopt_count());
 }
 
 static void ReturnThis(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -478,6 +452,10 @@ RUNTIME_FUNCTION(Runtime_ClearFunctionFeedback) {
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
   function->ClearTypeFeedbackInfo();
+  Code* unoptimized = function->shared()->code();
+  if (unoptimized->kind() == Code::FUNCTION) {
+    unoptimized->ClearInlineCaches();
+  }
   return isolate->heap()->undefined_value();
 }
 
@@ -626,24 +604,6 @@ RUNTIME_FUNCTION(Runtime_DebugPrint) {
   return args[0];  // return TOS
 }
 
-RUNTIME_FUNCTION(Runtime_PrintWithNameForAssert) {
-  SealHandleScope shs(isolate);
-  DCHECK_EQ(2, args.length());
-
-  CONVERT_ARG_CHECKED(String, name, 0);
-
-  PrintF(" * ");
-  StringCharacterStream stream(name);
-  while (stream.HasMore()) {
-    uint16_t character = stream.GetNext();
-    PrintF("%c", character);
-  }
-  PrintF(": ");
-  args[1]->ShortPrint();
-  PrintF("\n");
-
-  return isolate->heap()->undefined_value();
-}
 
 RUNTIME_FUNCTION(Runtime_DebugTrace) {
   SealHandleScope shs(isolate);
@@ -652,17 +612,6 @@ RUNTIME_FUNCTION(Runtime_DebugTrace) {
   return isolate->heap()->undefined_value();
 }
 
-RUNTIME_FUNCTION(Runtime_DebugTrackRetainingPath) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  if (!FLAG_track_retaining_path) {
-    PrintF("DebugTrackRetainingPath requires --track-retaining-path flag.\n");
-  } else {
-    CONVERT_ARG_HANDLE_CHECKED(HeapObject, object, 0);
-    isolate->heap()->AddRetainingPathTarget(object);
-  }
-  return isolate->heap()->undefined_value();
-}
 
 // This will not allocate (flatten the string), but it may run
 // very slowly for very deeply nested ConsStrings.  For debugging use only.
@@ -738,8 +687,7 @@ RUNTIME_FUNCTION(Runtime_DisassembleFunction) {
   DCHECK_EQ(1, args.length());
   // Get the function and make sure it is compiled.
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, func, 0);
-  if (!func->is_compiled() &&
-      !Compiler::Compile(func, Compiler::KEEP_EXCEPTION)) {
+  if (!Compiler::Compile(func, Compiler::KEEP_EXCEPTION)) {
     return isolate->heap()->exception();
   }
   OFStream os(stdout);

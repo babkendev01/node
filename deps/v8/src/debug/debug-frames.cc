@@ -14,24 +14,13 @@ namespace internal {
 FrameInspector::FrameInspector(StandardFrame* frame, int inlined_frame_index,
                                Isolate* isolate)
     : frame_(frame),
+      frame_summary_(FrameSummary::Get(frame, inlined_frame_index)),
       isolate_(isolate) {
-  // Extract the relevant information from the frame summary and discard it.
-  FrameSummary summary = FrameSummary::Get(frame, inlined_frame_index);
-
-  is_constructor_ = summary.is_constructor();
-  source_position_ = summary.SourcePosition();
-  function_name_ = summary.FunctionName();
-  script_ = Handle<Script>::cast(summary.script());
-  receiver_ = summary.receiver();
-
-  if (summary.IsJavaScript()) {
-    function_ = summary.AsJavaScript().function();
-  }
-
   JavaScriptFrame* js_frame =
       frame->is_java_script() ? javascript_frame() : nullptr;
   DCHECK(js_frame || frame->is_wasm());
   has_adapted_arguments_ = js_frame && js_frame->has_adapted_arguments();
+  is_bottommost_ = inlined_frame_index == 0;
   is_optimized_ = frame_->is_optimized();
   is_interpreted_ = frame_->is_interpreted();
 
@@ -49,8 +38,10 @@ FrameInspector::FrameInspector(StandardFrame* frame, int inlined_frame_index,
         js_frame, inlined_frame_index, isolate));
   } else if (frame_->is_wasm_interpreter_entry()) {
     wasm_interpreted_frame_ =
-        summary.AsWasm().wasm_instance()->debug_info()->GetInterpretedFrame(
-            frame_->fp(), inlined_frame_index);
+        frame_summary_.AsWasm()
+            .wasm_instance()
+            ->debug_info()
+            ->GetInterpretedFrame(frame_->fp(), inlined_frame_index);
     DCHECK(wasm_interpreted_frame_);
   }
 }
@@ -65,6 +56,14 @@ int FrameInspector::GetParametersCount() {
   if (wasm_interpreted_frame_)
     return wasm_interpreted_frame_->GetParameterCount();
   return frame_->ComputeParametersCount();
+}
+
+Handle<Script> FrameInspector::GetScript() {
+  return Handle<Script>::cast(frame_summary_.script());
+}
+
+Handle<JSFunction> FrameInspector::GetFunction() {
+  return frame_summary_.AsJavaScript().function();
 }
 
 Handle<Object> FrameInspector::GetParameter(int index) {
@@ -84,14 +83,16 @@ Handle<Object> FrameInspector::GetExpression(int index) {
                        : handle(frame_->GetExpression(index), isolate_);
 }
 
-Handle<Object> FrameInspector::GetContext() {
-  return deoptimized_frame_ ? deoptimized_frame_->GetContext()
-                            : handle(frame_->context(), isolate_);
+int FrameInspector::GetSourcePosition() {
+  return frame_summary_.SourcePosition();
 }
 
-bool FrameInspector::IsWasm() { return frame_->is_wasm(); }
+bool FrameInspector::IsConstructor() { return frame_summary_.is_constructor(); }
 
-bool FrameInspector::IsJavaScript() { return frame_->is_java_script(); }
+Handle<Object> FrameInspector::GetContext() {
+  return is_optimized_ ? deoptimized_frame_->GetContext()
+                       : handle(frame_->context(), isolate_);
+}
 
 // To inspect all the provided arguments the frame might need to be
 // replaced with the arguments frame.
@@ -210,13 +211,12 @@ int DebugFrameHelper::FindIndexedNonNativeFrame(StackTraceFrameIterator* it,
                                                 int index) {
   int count = -1;
   for (; !it->done(); it->Advance()) {
-    std::vector<FrameSummary> frames;
-    frames.reserve(FLAG_max_inlining_levels + 1);
+    List<FrameSummary> frames(FLAG_max_inlining_levels + 1);
     it->frame()->Summarize(&frames);
-    for (size_t i = frames.size(); i != 0; i--) {
+    for (int i = frames.length() - 1; i >= 0; i--) {
       // Omit functions from native and extension scripts.
-      if (!frames[i - 1].is_subject_to_debugging()) continue;
-      if (++count == index) return static_cast<int>(i) - 1;
+      if (!frames[i].is_subject_to_debugging()) continue;
+      if (++count == index) return i;
     }
   }
   return -1;

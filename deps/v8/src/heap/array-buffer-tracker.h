@@ -44,8 +44,7 @@ class ArrayBufferTracker : public AllStatic {
   // Frees all backing store pointers for dead JSArrayBuffer on a given page.
   // Requires marking information to be present. Requires the page lock to be
   // taken by the caller.
-  template <typename MarkingState>
-  static void FreeDead(Page* page, MarkingState* marking_state);
+  static void FreeDead(Page* page, const MarkingState& marking_state);
 
   // Frees all remaining, live or dead, array buffers on a page. Only useful
   // during tear down.

@@ -25,6 +25,20 @@
 namespace v8 {
 namespace internal {
 
+RUNTIME_FUNCTION(Runtime_DebugBreak) {
+  SealHandleScope shs(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(Object, value, 0);
+  HandleScope scope(isolate);
+  ReturnValueScope result_scope(isolate->debug());
+  isolate->debug()->set_return_value(*value);
+
+  // Get the top-most JavaScript frame.
+  JavaScriptFrameIterator it(isolate);
+  isolate->debug()->Break(it.frame());
+  return isolate->debug()->return_value();
+}
+
 RUNTIME_FUNCTION(Runtime_DebugBreakOnBytecode) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
@@ -46,12 +60,6 @@ RUNTIME_FUNCTION(Runtime_DebugBreakOnBytecode) {
   int bytecode_offset = interpreted_frame->GetBytecodeOffset();
   interpreter::Bytecode bytecode =
       interpreter::Bytecodes::FromByte(bytecode_array->get(bytecode_offset));
-  if (bytecode == interpreter::Bytecode::kReturn) {
-    // If we are returning, reset the bytecode array on the interpreted stack
-    // frame to the non-debug variant so that the interpreter entry trampoline
-    // sees the return bytecode rather than the DebugBreak.
-    interpreted_frame->PatchBytecodeArray(bytecode_array);
-  }
   return isolate->interpreter()->GetBytecodeHandler(
       bytecode, interpreter::OperandScale::kSingle);
 }
@@ -317,7 +325,7 @@ RUNTIME_FUNCTION(Runtime_DebugGetPropertyDetails) {
   // Make sure to set the current context to the context before the debugger was
   // entered (if the debugger is entered). The reason for switching context here
   // is that for some property lookups (accessors and interceptors) callbacks
-  // into the embedding application can occur, and the embedding application
+  // into the embedding application can occour, and the embedding application
   // could have the assumption that its own native context is the current
   // context and not some internal debugger context.
   SaveContext save(isolate);
@@ -433,14 +441,13 @@ RUNTIME_FUNCTION(Runtime_GetFrameCount) {
     return Smi::kZero;
   }
 
-  std::vector<FrameSummary> frames;
-  frames.reserve(FLAG_max_inlining_levels + 1);
+  List<FrameSummary> frames(FLAG_max_inlining_levels + 1);
   for (StackTraceFrameIterator it(isolate, id); !it.done(); it.Advance()) {
-    frames.clear();
+    frames.Clear();
     it.frame()->Summarize(&frames);
-    for (size_t i = frames.size(); i != 0; i--) {
+    for (int i = frames.length() - 1; i >= 0; i--) {
       // Omit functions from native and extension scripts.
-      if (frames[i - 1].is_subject_to_debugging()) n++;
+      if (frames[i].is_subject_to_debugging()) n++;
     }
   }
   return Smi::FromInt(n);
@@ -509,7 +516,7 @@ RUNTIME_FUNCTION(Runtime_GetFrameDetails) {
   Handle<Object> frame_id(DebugFrameHelper::WrapFrameId(it.frame()->id()),
                           isolate);
 
-  if (frame_inspector.IsWasm()) {
+  if (frame_inspector.summary().IsWasm()) {
     // Create the details array (no dynamic information for wasm).
     Handle<FixedArray> details =
         isolate->factory()->NewFixedArray(kFrameDetailsFirstDynamicIndex);
@@ -518,7 +525,7 @@ RUNTIME_FUNCTION(Runtime_GetFrameDetails) {
     details->set(kFrameDetailsFrameIdIndex, *frame_id);
 
     // Add the function name.
-    Handle<String> func_name = frame_inspector.GetFunctionName();
+    Handle<String> func_name = frame_inspector.summary().FunctionName();
     details->set(kFrameDetailsFunctionIndex, *func_name);
 
     // Add the script wrapper
@@ -533,7 +540,7 @@ RUNTIME_FUNCTION(Runtime_GetFrameDetails) {
     details->set(kFrameDetailsLocalCountIndex, Smi::kZero);
 
     // Add the source position.
-    int position = frame_inspector.GetSourcePosition();
+    int position = frame_inspector.summary().SourcePosition();
     details->set(kFrameDetailsSourcePositionIndex, Smi::FromInt(position));
 
     // Add the constructor information.
@@ -731,7 +738,7 @@ RUNTIME_FUNCTION(Runtime_GetFrameDetails) {
   }
 
   // Add the receiver (same as in function frame).
-  Handle<Object> receiver = frame_inspector.GetReceiver();
+  Handle<Object> receiver = frame_inspector.summary().receiver();
   DCHECK(function->shared()->IsUserJavaScript());
   // Optimized frames only restore the receiver as best-effort (see
   // OptimizedFrame::Summarize).

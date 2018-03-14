@@ -10,7 +10,6 @@
 #include "src/compiler/bytecode-liveness-map.h"
 #include "src/handles.h"
 #include "src/interpreter/bytecode-register.h"
-#include "src/utils.h"
 #include "src/zone/zone-containers.h"
 
 namespace v8 {
@@ -26,10 +25,12 @@ class V8_EXPORT_PRIVATE BytecodeLoopAssignments {
 
   void Add(interpreter::Register r);
   void AddList(interpreter::Register r, uint32_t count);
+  void AddAll();
   void Union(const BytecodeLoopAssignments& other);
 
   bool ContainsParameter(int index) const;
   bool ContainsLocal(int index) const;
+  bool ContainsAccumulator() const;
 
   int parameter_count() const { return parameter_count_; }
   int local_count() const { return bit_vector_->length() - parameter_count_; }
@@ -79,9 +80,10 @@ class V8_EXPORT_PRIVATE BytecodeAnalysis BASE_EMBEDDED {
   const LoopInfo& GetLoopInfoFor(int header_offset) const;
 
   // True if the current analysis has an OSR entry point.
-  bool HasOsrEntryPoint() const { return osr_entry_point_ != -1; }
+  bool HasOSREntryPoint() const { return osr_entry_point_ != -1; }
+  // True if {offset} is the OSR entry loop header.
+  bool IsOSREntryPoint(int offset) const { return osr_entry_point_ == offset; }
 
-  int osr_entry_point() const { return osr_entry_point_; }
   // Gets the in-liveness for the bytecode at {offset}.
   const BytecodeLivenessState* GetInLivenessFor(int offset) const;
 

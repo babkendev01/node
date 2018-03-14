@@ -24,12 +24,6 @@ namespace v8 {
 namespace internal {
 namespace compiler {
 
-namespace {
-// This is just to avoid some corner cases, especially since we allow recursive
-// inlining.
-static const int kMaxDepthForInlining = 50;
-}  // namespace
-
 #define TRACE(...)                                      \
   do {                                                  \
     if (FLAG_trace_turbo_inlining) PrintF(__VA_ARGS__); \
@@ -322,7 +316,7 @@ bool IsNonConstructible(Handle<SharedFunctionInfo> shared_info) {
   DisallowHeapAllocation no_gc;
   Isolate* const isolate = shared_info->GetIsolate();
   Code* const construct_stub = shared_info->construct_stub();
-  return construct_stub == *BUILTIN_CODE(isolate, ConstructedNonConstructable);
+  return construct_stub == *isolate->builtins()->ConstructedNonConstructable();
 }
 
 }  // namespace
@@ -438,6 +432,14 @@ Reduction JSInliner::ReduceJSCall(Node* node) {
   // Determine the call target.
   if (!DetermineCallTarget(node, shared_info)) return NoChange();
 
+  // Inlining is only supported in the bytecode pipeline.
+  if (!info_->is_optimizing_from_bytecode()) {
+    TRACE("Not inlining %s into %s due to use of the deprecated pipeline\n",
+          shared_info->DebugName()->ToCString().get(),
+          info_->shared_info()->DebugName()->ToCString().get());
+    return NoChange();
+  }
+
   // Function must be inlineable.
   if (!shared_info->IsInlineable()) {
     TRACE("Not inlining %s into %s because callee is not inlineable\n",
@@ -473,19 +475,19 @@ Reduction JSInliner::ReduceJSCall(Node* node) {
     return NoChange();
   }
 
-  // To ensure inlining always terminates, we have an upper limit on inlining
-  // the nested calls.
-  int nesting_level = 0;
+  // TODO(turbofan): TranslatedState::GetAdaptedArguments() currently relies on
+  // not inlining recursive functions. We might want to relax that at some
+  // point.
   for (Node* frame_state = call.frame_state();
        frame_state->opcode() == IrOpcode::kFrameState;
        frame_state = frame_state->InputAt(kFrameStateOuterStateInput)) {
-    nesting_level++;
-    if (nesting_level > kMaxDepthForInlining) {
-      TRACE(
-          "Not inlining %s into %s because call has exceeded the maximum depth "
-          "for function inlining\n",
-          shared_info->DebugName()->ToCString().get(),
-          info_->shared_info()->DebugName()->ToCString().get());
+    FrameStateInfo const& frame_info = OpParameter<FrameStateInfo>(frame_state);
+    Handle<SharedFunctionInfo> frame_shared_info;
+    if (frame_info.shared_info().ToHandle(&frame_shared_info) &&
+        *frame_shared_info == *shared_info) {
+      TRACE("Not inlining %s into %s because call is recursive\n",
+            shared_info->DebugName()->ToCString().get(),
+            info_->shared_info()->DebugName()->ToCString().get());
       return NoChange();
     }
   }
@@ -504,11 +506,19 @@ Reduction JSInliner::ReduceJSCall(Node* node) {
     return NoChange();
   }
 
-  if (!shared_info->is_compiled() &&
-      !Compiler::Compile(shared_info, Compiler::CLEAR_EXCEPTION)) {
+  ParseInfo parse_info(shared_info);
+  CompilationInfo info(parse_info.zone(), &parse_info,
+                       shared_info->GetIsolate(), Handle<JSFunction>::null());
+  if (info_->is_deoptimization_enabled()) info.MarkAsDeoptimizationEnabled();
+  info.MarkAsOptimizeFromBytecode();
+
+  if (!Compiler::EnsureBytecode(&info)) {
     TRACE("Not inlining %s into %s because bytecode generation failed\n",
           shared_info->DebugName()->ToCString().get(),
           info_->shared_info()->DebugName()->ToCString().get());
+    if (info_->isolate()->has_pending_exception()) {
+      info_->isolate()->clear_pending_exception();
+    }
     return NoChange();
   }
 
@@ -540,9 +550,9 @@ Reduction JSInliner::ReduceJSCall(Node* node) {
       flags |= JSTypeHintLowering::kBailoutOnUninitialized;
     }
     BytecodeGraphBuilder graph_builder(
-        zone(), shared_info, feedback_vector, BailoutId::None(), jsgraph(),
-        call.frequency(), source_positions_, inlining_id, flags, false);
-    graph_builder.CreateGraph();
+        parse_info.zone(), shared_info, feedback_vector, BailoutId::None(),
+        jsgraph(), call.frequency(), source_positions_, inlining_id, flags);
+    graph_builder.CreateGraph(false);
 
     // Extract the inlinee start/end nodes.
     start = graph()->start();
@@ -595,7 +605,7 @@ Reduction JSInliner::ReduceJSCall(Node* node) {
       Node* frame_state_inside = CreateArtificialFrameState(
           node, frame_state, call.formal_arguments(),
           BailoutId::ConstructStubCreate(), FrameStateType::kConstructStub,
-          shared_info);
+          info.shared_info());
       Node* create =
           graph()->NewNode(javascript()->Create(), call.target(), new_target,
                            context, frame_state_inside, effect, control);
@@ -691,10 +701,10 @@ Reduction JSInliner::ReduceJSCall(Node* node) {
     node->ReplaceInput(1, receiver);
     // Insert a construct stub frame into the chain of frame states. This will
     // reconstruct the proper frame when deoptimizing within the constructor.
-    frame_state =
-        CreateArtificialFrameState(node, frame_state, call.formal_arguments(),
-                                   BailoutId::ConstructStubInvoke(),
-                                   FrameStateType::kConstructStub, shared_info);
+    frame_state = CreateArtificialFrameState(
+        node, frame_state, call.formal_arguments(),
+        BailoutId::ConstructStubInvoke(), FrameStateType::kConstructStub,
+        info.shared_info());
   }
 
   // Insert a JSConvertReceiver node for sloppy callees. Note that the context
@@ -739,8 +749,6 @@ CommonOperatorBuilder* JSInliner::common() const { return jsgraph()->common(); }
 SimplifiedOperatorBuilder* JSInliner::simplified() const {
   return jsgraph()->simplified();
 }
-
-#undef TRACE
 
 }  // namespace compiler
 }  // namespace internal

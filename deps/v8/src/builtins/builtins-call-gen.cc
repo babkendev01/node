@@ -49,14 +49,13 @@ void Builtins::Generate_CallVarargs(MacroAssembler* masm) {
 }
 
 void Builtins::Generate_CallForwardVarargs(MacroAssembler* masm) {
-  Generate_CallOrConstructForwardVarargs(masm, CallOrConstructMode::kCall,
+  Generate_CallOrConstructForwardVarargs(masm,
                                          masm->isolate()->builtins()->Call());
 }
 
 void Builtins::Generate_CallFunctionForwardVarargs(MacroAssembler* masm) {
   Generate_CallOrConstructForwardVarargs(
-      masm, CallOrConstructMode::kCall,
-      masm->isolate()->builtins()->CallFunction());
+      masm, masm->isolate()->builtins()->CallFunction());
 }
 
 void CallOrConstructBuiltinsAssembler::CallOrConstructWithArrayLike(

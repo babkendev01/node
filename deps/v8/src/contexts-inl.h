@@ -67,7 +67,8 @@ void Context::set_extension(HeapObject* object) {
   set(EXTENSION_INDEX, object);
 }
 
-Context* Context::native_context() const {
+
+Context* Context::native_context() {
   Object* result = get(NATIVE_CONTEXT_INDEX);
   DCHECK(IsBootstrappingOrNativeContext(this->GetIsolate(), result));
   return reinterpret_cast<Context*>(result);
@@ -78,66 +79,72 @@ void Context::set_native_context(Context* context) {
   set(NATIVE_CONTEXT_INDEX, context);
 }
 
-bool Context::IsNativeContext() const {
+
+bool Context::IsNativeContext() {
   Map* map = this->map();
   return map == map->GetHeap()->native_context_map();
 }
 
-bool Context::IsFunctionContext() const {
+
+bool Context::IsFunctionContext() {
   Map* map = this->map();
   return map == map->GetHeap()->function_context_map();
 }
 
-bool Context::IsCatchContext() const {
+
+bool Context::IsCatchContext() {
   Map* map = this->map();
   return map == map->GetHeap()->catch_context_map();
 }
 
-bool Context::IsWithContext() const {
+
+bool Context::IsWithContext() {
   Map* map = this->map();
   return map == map->GetHeap()->with_context_map();
 }
 
-bool Context::IsDebugEvaluateContext() const {
+bool Context::IsDebugEvaluateContext() {
   Map* map = this->map();
   return map == map->GetHeap()->debug_evaluate_context_map();
 }
 
-bool Context::IsBlockContext() const {
+bool Context::IsBlockContext() {
   Map* map = this->map();
   return map == map->GetHeap()->block_context_map();
 }
 
-bool Context::IsModuleContext() const {
+
+bool Context::IsModuleContext() {
   Map* map = this->map();
   return map == map->GetHeap()->module_context_map();
 }
 
-bool Context::IsEvalContext() const {
+bool Context::IsEvalContext() {
   Map* map = this->map();
   return map == map->GetHeap()->eval_context_map();
 }
 
-bool Context::IsScriptContext() const {
+bool Context::IsScriptContext() {
   Map* map = this->map();
   return map == map->GetHeap()->script_context_map();
 }
 
-bool Context::HasSameSecurityTokenAs(Context* that) const {
+bool Context::HasSameSecurityTokenAs(Context* that) {
   return this->native_context()->security_token() ==
          that->native_context()->security_token();
 }
+
 
 #define NATIVE_CONTEXT_FIELD_ACCESSORS(index, type, name) \
   void Context::set_##name(type* value) {                 \
     DCHECK(IsNativeContext());                            \
     set(index, value);                                    \
   }                                                       \
-  bool Context::is_##name(type* value) const {            \
+  bool Context::is_##name(type* value) {                  \
     DCHECK(IsNativeContext());                            \
     return type::cast(get(index)) == value;               \
   }                                                       \
-  type* Context::name() const {                           \
+  type* Context::name() {                                 \
     DCHECK(IsNativeContext());                            \
     return type::cast(get(index));                        \
   }
@@ -210,15 +217,6 @@ int Context::FunctionMapIndex(LanguageMode language_mode, FunctionKind kind,
 
 #undef CHECK_FOLLOWS2
 #undef CHECK_FOLLOWS4
-
-Map* Context::GetInitialJSArrayMap(ElementsKind kind) const {
-  DCHECK(IsNativeContext());
-  if (!IsFastElementsKind(kind)) return nullptr;
-  DisallowHeapAllocation no_gc;
-  Object* const initial_js_array_map = get(Context::ArrayMapIndex(kind));
-  DCHECK(!initial_js_array_map->IsUndefined(GetIsolate()));
-  return Map::cast(initial_js_array_map);
-}
 
 }  // namespace internal
 }  // namespace v8

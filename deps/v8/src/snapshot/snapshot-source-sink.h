@@ -86,7 +86,7 @@ class SnapshotByteSink {
 
   ~SnapshotByteSink() {}
 
-  void Put(byte b, const char* description) { data_.push_back(b); }
+  void Put(byte b, const char* description) { data_.Add(b); }
 
   void PutSection(int b, const char* description) {
     DCHECK_LE(b, kMaxUInt8);
@@ -95,12 +95,12 @@ class SnapshotByteSink {
 
   void PutInt(uintptr_t integer, const char* description);
   void PutRaw(const byte* data, int number_of_bytes, const char* description);
-  int Position() { return static_cast<int>(data_.size()); }
+  int Position() { return data_.length(); }
 
-  const std::vector<byte>* data() const { return &data_; }
+  const List<byte>* data() const { return &data_; }
 
  private:
-  std::vector<byte> data_;
+  List<byte> data_;
 };
 
 }  // namespace internal

@@ -26,12 +26,11 @@ namespace {
 class BlockingCompilationJob : public CompilationJob {
  public:
   BlockingCompilationJob(Isolate* isolate, Handle<JSFunction> function)
-      : CompilationJob(isolate, &parse_info_, &info_, "BlockingCompilationJob",
+      : CompilationJob(isolate, &info_, "BlockingCompilationJob",
                        State::kReadyToExecute),
-        shared_(function->shared()),
-        parse_info_(shared_),
-        info_(parse_info_.zone(), function->GetIsolate(), parse_info_.script(),
-              shared_, function),
+        parse_info_(handle(function->shared())),
+        info_(parse_info_.zone(), &parse_info_, function->GetIsolate(),
+              function),
         blocking_(false),
         semaphore_(0) {}
   ~BlockingCompilationJob() override = default;
@@ -54,7 +53,6 @@ class BlockingCompilationJob : public CompilationJob {
   Status FinalizeJobImpl() override { return SUCCEEDED; }
 
  private:
-  Handle<SharedFunctionInfo> shared_;
   ParseInfo parse_info_;
   CompilationInfo info_;
   base::AtomicValue<bool> blocking_;

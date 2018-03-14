@@ -22,8 +22,8 @@
 #include "src/property.h"
 #include "src/transitions.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 // TODO(ishell): fix this once TransitionToPrototype stops generalizing
 // all field representations (similar to crbug/448711 where elements kind
@@ -366,10 +366,9 @@ class Expectations {
                  heap_type);
 
     Handle<String> name = MakeName("prop", property_index);
-    bool created_new_map;
     return Map::TransitionToDataProperty(
         map, name, value, attributes, constness,
-        Object::CERTAINLY_NOT_STORE_FROM_KEYED, &created_new_map);
+        Object::CERTAINLY_NOT_STORE_FROM_KEYED);
   }
 
   Handle<Map> TransitionToDataConstant(Handle<Map> map,
@@ -380,10 +379,9 @@ class Expectations {
     SetDataConstant(property_index, attributes, value);
 
     Handle<String> name = MakeName("prop", property_index);
-    bool created_new_map;
-    return Map::TransitionToDataProperty(map, name, value, attributes, kConst,
-                                         Object::CERTAINLY_NOT_STORE_FROM_KEYED,
-                                         &created_new_map);
+    return Map::TransitionToDataProperty(
+        map, name, value, attributes, kConst,
+        Object::CERTAINLY_NOT_STORE_FROM_KEYED);
   }
 
   Handle<Map> FollowDataTransition(Handle<Map> map,
@@ -398,7 +396,7 @@ class Expectations {
 
     Handle<String> name = MakeName("prop", property_index);
     Map* target =
-        TransitionsAccessor(map).SearchTransition(*name, kData, attributes);
+        TransitionArray::SearchTransition(*map, kData, *name, attributes);
     CHECK(target != NULL);
     return handle(target);
   }
@@ -2117,7 +2115,7 @@ TEST(ReconfigurePropertySplitMapTransitionsOverflow) {
 
       Handle<String> name = MakeName("prop", i);
       Map* target =
-          TransitionsAccessor(map2).SearchTransition(*name, kData, NONE);
+          TransitionArray::SearchTransition(*map2, kData, *name, NONE);
       CHECK(target != NULL);
       map2 = handle(target);
     }
@@ -2139,14 +2137,14 @@ TEST(ReconfigurePropertySplitMapTransitionsOverflow) {
   CHECK(!map2->is_deprecated());
 
   // Fill in transition tree of |map2| so that it can't have more transitions.
-  for (int i = 0; i < TransitionsAccessor::kMaxNumberOfTransitions; i++) {
-    CHECK(TransitionsAccessor(map2).CanHaveMoreTransitions());
+  for (int i = 0; i < TransitionArray::kMaxNumberOfTransitions; i++) {
+    CHECK(TransitionArray::CanHaveMoreTransitions(map2));
     Handle<String> name = MakeName("foo", i);
     Map::CopyWithField(map2, name, any_type, NONE, kMutable,
                        Representation::Smi(), INSERT_TRANSITION)
         .ToHandleChecked();
   }
-  CHECK(!TransitionsAccessor(map2).CanHaveMoreTransitions());
+  CHECK(!TransitionArray::CanHaveMoreTransitions(map2));
 
   // Try to update |map|, since there is no place for propX transition at |map2|
   // |map| should become "copy-generalized".
@@ -2741,6 +2739,3 @@ TEST(HoleyMutableHeapNumber) {
   CHECK(obj->IsMutableHeapNumber());
   CHECK_EQ(kHoleNanInt64, HeapNumber::cast(*obj)->value_as_bits());
 }
-
-}  // namespace internal
-}  // namespace v8

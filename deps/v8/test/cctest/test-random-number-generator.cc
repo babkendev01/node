@@ -32,8 +32,8 @@
 
 #include "src/base/utils/random-number-generator.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 static const int64_t kRandomSeeds[] = {-1, 1, 42, 100, 1234567890, 987654321};
 
@@ -174,6 +174,3 @@ TEST_RANDOM_BIT(30)
 TEST_RANDOM_BIT(31)
 
 #undef TEST_RANDOM_BIT
-
-}  // namespace internal
-}  // namespace v8

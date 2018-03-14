@@ -3,6 +3,6 @@
 // found in the LICENSE file.
 
 // Access any property that's also available on the global of the other realm.
-this.__defineGetter__("Object", ()=>0);
+__defineGetter__("Object", ()=>0);
 __proto__ = Realm.global(Realm.create());
 Object;

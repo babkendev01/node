@@ -404,15 +404,17 @@ TEST_F(LoadEliminationTest, LoadFieldWithTypeMismatch) {
 
   load_elimination.Reduce(graph()->start());
 
-  effect = graph()->NewNode(simplified()->StoreField(access), object, value,
-                            effect, control);
+  Node* store = effect = graph()->NewNode(simplified()->StoreField(access),
+                                          object, value, effect, control);
   load_elimination.Reduce(effect);
 
   Node* load = graph()->NewNode(simplified()->LoadField(access), object, effect,
                                 control);
+  EXPECT_CALL(editor,
+              ReplaceWithValue(load, IsTypeGuard(value, control), store, _));
   Reduction r = load_elimination.Reduce(load);
   ASSERT_TRUE(r.Changed());
-  EXPECT_EQ(load, r.replacement());
+  EXPECT_THAT(r.replacement(), IsTypeGuard(value, control));
 }
 
 TEST_F(LoadEliminationTest, LoadElementWithTypeMismatch) {
@@ -429,15 +431,18 @@ TEST_F(LoadEliminationTest, LoadElementWithTypeMismatch) {
 
   load_elimination.Reduce(graph()->start());
 
-  effect = graph()->NewNode(simplified()->StoreElement(access), object, index,
-                            value, effect, control);
+  Node* store = effect =
+      graph()->NewNode(simplified()->StoreElement(access), object, index, value,
+                       effect, control);
   load_elimination.Reduce(effect);
 
   Node* load = graph()->NewNode(simplified()->LoadElement(access), object,
                                 index, effect, control);
+  EXPECT_CALL(editor,
+              ReplaceWithValue(load, IsTypeGuard(value, control), store, _));
   Reduction r = load_elimination.Reduce(load);
   ASSERT_TRUE(r.Changed());
-  EXPECT_EQ(load, r.replacement());
+  EXPECT_THAT(r.replacement(), IsTypeGuard(value, control));
 }
 
 TEST_F(LoadEliminationTest, AliasAnalysisForFinishRegion) {

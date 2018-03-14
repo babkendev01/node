@@ -7,6 +7,7 @@
 #include "src/base/atomicops.h"
 #include "src/compilation-info.h"
 #include "src/compiler.h"
+#include "src/full-codegen/full-codegen.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
 #include "src/tracing/trace-event.h"
@@ -19,7 +20,7 @@ namespace {
 
 void DisposeCompilationJob(CompilationJob* job, bool restore_function_code) {
   if (restore_function_code) {
-    Handle<JSFunction> function = job->compilation_info()->closure();
+    Handle<JSFunction> function = job->info()->closure();
     function->ReplaceCode(function->shared()->code());
     if (function->IsInOptimizationQueue()) {
       function->ClearOptimizationMarker();
@@ -196,7 +197,7 @@ void OptimizingCompileDispatcher::InstallOptimizedFunctions() {
       job = output_queue_.front();
       output_queue_.pop();
     }
-    CompilationInfo* info = job->compilation_info();
+    CompilationInfo* info = job->info();
     Handle<JSFunction> function(*info->closure());
     if (function->HasOptimizedCode()) {
       if (FLAG_trace_concurrent_recompilation) {

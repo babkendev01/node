@@ -9,10 +9,9 @@ assertThrows("/[\\p{garbage}]/u");
 assertThrows("/[\\p{}]/u");
 assertThrows("/[\\p{]/u");
 assertThrows("/[\\p}]/u");
-assertThrows("/^[\\p{Lu}-\\p{Ll}]+$/u");
 
 assertTrue(/^[\p{Lu}\p{Ll}]+$/u.test("ABCabc"));
-assertTrue(/^[\p{Lu}-]+$/u.test("ABC-"));
+assertTrue(/^[\p{Lu}-\p{Ll}]+$/u.test("ABC-abc"));
 assertFalse(/^[\P{Lu}\p{Ll}]+$/u.test("ABCabc"));
 assertTrue(/^[\P{Lu}\p{Ll}]+$/u.test("abc"));
 assertTrue(/^[\P{Lu}]+$/u.test("abc123"));

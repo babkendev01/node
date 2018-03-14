@@ -41,8 +41,19 @@
 #include "test/cctest/cctest.h"
 #include "test/cctest/trace-extension.h"
 
-namespace v8 {
-namespace internal {
+using v8::Function;
+using v8::Local;
+using v8::Object;
+using v8::Script;
+using v8::String;
+using v8::TickSample;
+using v8::Value;
+
+using v8::internal::byte;
+using v8::internal::Address;
+using v8::internal::Handle;
+using v8::internal::Isolate;
+using v8::internal::JSFunction;
 
 static bool IsAddressWithinFuncCode(JSFunction* function, void* addr) {
   Address address = reinterpret_cast<Address>(addr);
@@ -283,6 +294,3 @@ TEST(JsEntrySp) {
   CompileRun("js_entry_sp_level2();");
   CHECK(!i::TraceExtension::GetJsEntrySp());
 }
-
-}  // namespace internal
-}  // namespace v8

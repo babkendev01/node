@@ -4,8 +4,6 @@
 
 load('../base.js');
 
-let listener = null;
-
 load('debugger.js');
 load('runtime.js');
 
@@ -37,10 +35,4 @@ function SendMessage(method, params) {
     obj.params = params;
   }
   send(JSON.stringify(obj));
-}
-
-function receive(message) {
-  if (listener) {
-    listener(JSON.parse(message));
-  }
 }

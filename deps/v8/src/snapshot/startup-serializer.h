@@ -63,7 +63,6 @@ class StartupSerializer : public Serializer {
   void SerializeObject(HeapObject* o, HowToCode how_to_code,
                        WhereToPoint where_to_point, int skip) override;
   void Synchronize(VisitorSynchronization::SyncTag tag) override;
-  bool MustBeDeferred(HeapObject* object) override;
 
   // Some roots should not be serialized, because their actual value depends on
   // absolute addresses and they are reset after deserialization, anyway.
@@ -78,7 +77,7 @@ class StartupSerializer : public Serializer {
   bool serializing_immortal_immovables_roots_;
   std::bitset<Heap::kStrongRootListLength> root_has_been_serialized_;
   PartialCacheIndexMap partial_cache_index_map_;
-  std::vector<AccessorInfo*> accessor_infos_;
+  List<AccessorInfo*> accessor_infos_;
   // Indicates whether we only serialized hash tables that we can rehash.
   // TODO(yangguo): generalize rehashing, and remove this flag.
   bool can_be_rehashed_;

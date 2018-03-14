@@ -11,8 +11,10 @@ snippet: "
 "
 frame size: 1
 parameter count: 1
-bytecode array length: 4
+bytecode array length: 9
 bytecodes: [
+                B(Mov), R(new_target), R(0),
+                B(Ldar), R(0),
   /*   30 E> */ B(StackCheck),
   /*   34 S> */ B(Ldar), R(0),
   /*   52 S> */ B(Return),
@@ -28,8 +30,10 @@ snippet: "
 "
 frame size: 1
 parameter count: 1
-bytecode array length: 3
+bytecode array length: 8
 bytecodes: [
+                B(Mov), R(new_target), R(0),
+                B(Ldar), R(0),
   /*   30 E> */ B(StackCheck),
   /*   34 S> */ B(LdaUndefined),
   /*   46 S> */ B(Return),

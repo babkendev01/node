@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "src/handles.h"
+#include "src/list.h"
 
 namespace v8 {
 namespace internal {
@@ -269,7 +270,6 @@ class ErrorUtils : public AllStatic {
     "ArrayBuffer subclass returned this from species constructor")             \
   T(ArrayFunctionsOnFrozen, "Cannot modify frozen array elements")             \
   T(ArrayFunctionsOnSealed, "Cannot add/remove sealed array elements")         \
-  T(AwaitNotInAsyncFunction, "await is only valid in async function")          \
   T(AtomicsWaitNotAllowed, "Atomics.wait cannot be called in this context")    \
   T(CalledNonCallable, "% is not a function")                                  \
   T(CalledOnNonObject, "% called on non-object")                               \
@@ -344,10 +344,6 @@ class ErrorUtils : public AllStatic {
   T(NotConstructor, "% is not a constructor")                                  \
   T(NotDateObject, "this is not a Date object.")                               \
   T(NotGeneric, "% requires that 'this' be a %")                               \
-  T(NotCallableOrIterable,                                                     \
-    "% is not a function or its return value is not iterable")                 \
-  T(NotCallableOrAsyncIterable,                                                \
-    "% is not a function or its return value is not async iterable")           \
   T(NotIterable, "% is not iterable")                                          \
   T(NotAsyncIterable, "% is not async iterable")                               \
   T(NotPropertyName, "% is not a valid property name")                         \
@@ -475,6 +471,7 @@ class ErrorUtils : public AllStatic {
   T(SharedArrayBufferSpeciesThis,                                              \
     "SharedArrayBuffer subclass returned this from species constructor")       \
   T(StaticPrototype, "Classes may not have static property named prototype")   \
+  T(StrictCannotAssign, "Cannot assign to read only '%' in strict mode")       \
   T(StrictDeleteProperty, "Cannot delete property '%' of %")                   \
   T(StrictPoisonPill,                                                          \
     "'caller', 'callee', and 'arguments' properties may not be accessed on "   \
@@ -530,11 +527,10 @@ class ErrorUtils : public AllStatic {
   T(LetInLexicalBinding, "let is disallowed as a lexically bound name")        \
   T(LocaleMatcher, "Illegal value for localeMatcher:%")                        \
   T(NormalizationForm, "The normalization form should be one of %.")           \
-  T(NumberFormatRange, "% argument must be between 0 and 100")                 \
+  T(NumberFormatRange, "% argument must be between 0 and 20")                  \
   T(PropertyValueOutOfRange, "% value is out of range.")                       \
   T(StackOverflow, "Maximum call stack size exceeded")                         \
-  T(ToPrecisionFormatRange,                                                    \
-    "toPrecision() argument must be between 1 and 100")                        \
+  T(ToPrecisionFormatRange, "toPrecision() argument must be between 1 and 21") \
   T(ToRadixFormatRange, "toString() radix argument must be between 2 and 36")  \
   T(TypedArraySetNegativeOffset, "Start offset is negative")                   \
   T(TypedArraySetSourceTooLarge, "Source is too large")                        \
@@ -560,11 +556,8 @@ class ErrorUtils : public AllStatic {
     "% loop variable declaration may not have an initializer.")                \
   T(ForInOfLoopMultiBindings,                                                  \
     "Invalid left-hand side in % loop: Must have a single binding.")           \
-  T(GeneratorInSingleStatementContext,                                         \
-    "Generators can only be declared at the top level or inside a block.")     \
-  T(AsyncFunctionInSingleStatementContext,                                     \
-    "Async functions can only be declared at the top level or inside a "       \
-    "block.")                                                                  \
+  T(GeneratorInLegacyContext,                                                  \
+    "Generator declarations are not allowed in legacy contexts.")              \
   T(IllegalBreak, "Illegal break statement")                                   \
   T(NoIterationStatement,                                                      \
     "Illegal continue statement: no surrounding iteration statement")          \
@@ -702,7 +695,6 @@ class ErrorUtils : public AllStatic {
   T(WasmTrapFuncSigMismatch, "function signature mismatch")                    \
   T(WasmTrapInvalidIndex, "invalid index into function table")                 \
   T(WasmTrapTypeError, "invalid type")                                         \
-  T(WasmExceptionError, "wasm exception")                                      \
   /* Asm.js validation related */                                              \
   T(AsmJsInvalid, "Invalid asm.js: %")                                         \
   T(AsmJsCompiled, "Converted asm.js to WebAssembly: %")                       \

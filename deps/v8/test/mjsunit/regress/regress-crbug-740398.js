@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax
-
 var longString = (function() {
-  return "a".repeat(%StringMaxLength());
+  var str = "";
+  for (var i = 0; i < 24; i++) {
+    str += "abcdefgh12345678" + str;
+  }
+  return str;
 })();
 
 assertThrows(() => { return { get[longString]() { } } }, RangeError);

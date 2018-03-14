@@ -18,9 +18,8 @@ namespace {
 static const int kMaxIdentifierCount = 0xf000000;
 };
 
-AsmJsScanner::AsmJsScanner(Utf16CharacterStream* stream)
-    : stream_(stream),
-      token_(kUninitialized),
+AsmJsScanner::AsmJsScanner()
+    : token_(kUninitialized),
       preceding_token_(kUninitialized),
       next_token_(kUninitialized),
       position_(0),
@@ -45,6 +44,14 @@ AsmJsScanner::AsmJsScanner(Utf16CharacterStream* stream)
 #define V(name) global_names_[#name] = kToken_##name;
   KEYWORD_NAME_LIST(V)
 #undef V
+}
+
+// Destructor of unique_ptr<T> requires complete declaration of T, we only want
+// to include the necessary declaration here instead of the header file.
+AsmJsScanner::~AsmJsScanner() {}
+
+void AsmJsScanner::SetStream(std::unique_ptr<Utf16CharacterStream> stream) {
+  stream_ = std::move(stream);
   Next();
 }
 

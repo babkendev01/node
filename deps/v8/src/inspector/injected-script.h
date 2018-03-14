@@ -32,7 +32,6 @@
 #define V8_INSPECTOR_INJECTEDSCRIPT_H_
 
 #include <unordered_map>
-#include <unordered_set>
 
 #include "src/base/macros.h"
 #include "src/inspector/inspected-context.h"
@@ -52,16 +51,6 @@ class V8InspectorSessionImpl;
 
 using protocol::Maybe;
 using protocol::Response;
-
-class EvaluateCallback {
- public:
-  virtual void sendSuccess(
-      std::unique_ptr<protocol::Runtime::RemoteObject> result,
-      protocol::Maybe<protocol::Runtime::ExceptionDetails>
-          exceptionDetails) = 0;
-  virtual void sendFailure(const protocol::DispatchResponse& response) = 0;
-  virtual ~EvaluateCallback() {}
-};
 
 class InjectedScript final {
  public:
@@ -97,12 +86,6 @@ class InjectedScript final {
   std::unique_ptr<protocol::Runtime::RemoteObject> wrapTable(
       v8::Local<v8::Value> table, v8::Local<v8::Value> columns) const;
 
-  void addPromiseCallback(V8InspectorSessionImpl* session,
-                          v8::MaybeLocal<v8::Value> value,
-                          const String16& objectGroup, bool returnByValue,
-                          bool generatePreview,
-                          std::unique_ptr<EvaluateCallback> callback);
-
   Response findObject(const RemoteObjectId&, v8::Local<v8::Value>*) const;
   String16 objectGroupName(const RemoteObjectId&) const;
   void releaseObjectGroup(const String16&);
@@ -119,7 +102,6 @@ class InjectedScript final {
       std::unique_ptr<protocol::Runtime::RemoteObject>* result,
       Maybe<protocol::Runtime::ExceptionDetails>*);
   v8::Local<v8::Value> lastEvaluationResult() const;
-  void setLastEvaluationResult(v8::Local<v8::Value> result);
 
   int bindObject(v8::Local<v8::Value>, const String16& groupName);
 
@@ -208,11 +190,6 @@ class InjectedScript final {
   v8::Local<v8::Object> commandLineAPI();
   void unbindObject(int id);
 
-  class ProtocolPromiseHandler;
-  void discardEvaluateCallbacks();
-  std::unique_ptr<EvaluateCallback> takeEvaluateCallback(
-      EvaluateCallback* callback);
-
   InspectedContext* m_context;
   v8::Global<v8::Value> m_value;
   int m_sessionId;
@@ -222,7 +199,6 @@ class InjectedScript final {
   std::unordered_map<int, v8::Global<v8::Value>> m_idToWrappedObject;
   std::unordered_map<int, String16> m_idToObjectGroupName;
   std::unordered_map<String16, std::vector<int>> m_nameToObjectGroup;
-  std::unordered_set<EvaluateCallback*> m_evaluateCallbacks;
 
   DISALLOW_COPY_AND_ASSIGN(InjectedScript);
 };

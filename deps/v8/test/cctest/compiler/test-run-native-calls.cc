@@ -19,7 +19,7 @@ namespace v8 {
 namespace internal {
 namespace compiler {
 
-const auto GetRegConfig = RegisterConfiguration::Default;
+const auto GetRegConfig = RegisterConfiguration::Turbofan;
 
 namespace {
 typedef float float32;

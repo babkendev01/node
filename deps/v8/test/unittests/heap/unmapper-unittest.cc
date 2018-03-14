@@ -52,6 +52,7 @@ TEST_F(SequentialUnmapperTest, UnmapOnTeardownAfterAlreadyFreeingPooled) {
       allocator()->AllocatePage(MemoryAllocator::PageAreaSize(OLD_SPACE),
                                 static_cast<PagedSpace*>(heap()->old_space()),
                                 Executability::NOT_EXECUTABLE);
+  heap()->old_space()->UnlinkFreeListCategories(page);
   EXPECT_NE(nullptr, page);
   const int page_size = getpagesize();
   void* start_address = static_cast<void*>(page->address());
@@ -70,6 +71,7 @@ TEST_F(SequentialUnmapperTest, UnmapOnTeardown) {
       allocator()->AllocatePage(MemoryAllocator::PageAreaSize(OLD_SPACE),
                                 static_cast<PagedSpace*>(heap()->old_space()),
                                 Executability::NOT_EXECUTABLE);
+  heap()->old_space()->UnlinkFreeListCategories(page);
   EXPECT_NE(nullptr, page);
   const int page_size = getpagesize();
   void* start_address = static_cast<void*>(page->address());

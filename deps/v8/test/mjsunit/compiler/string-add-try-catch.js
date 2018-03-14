@@ -4,7 +4,7 @@
 
 // Flags: --allow-natives-syntax
 
-var a = "a".repeat(%StringMaxLength());
+var a = "a".repeat(268435440);
 
 (function() {
   function foo(a, b) {

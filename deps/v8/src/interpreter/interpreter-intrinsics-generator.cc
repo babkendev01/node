@@ -88,18 +88,13 @@ Node* IntrinsicsGenerator::InvokeIntrinsic(Node* function_id, Node* context,
 #undef CASE
 
   __ Switch(function_id, &abort, cases, labels, arraysize(cases));
-#define HANDLE_CASE(name, lower_case, expected_arg_count)     \
-  __ BIND(&lower_case);                                       \
-  {                                                           \
-    if (FLAG_debug_code && expected_arg_count >= 0) {         \
-      AbortIfArgCountMismatch(expected_arg_count, arg_count); \
-    }                                                         \
-    Node* value = name(first_arg_reg, arg_count, context);    \
-    if (value) {                                              \
-      result.Bind(value);                                     \
-      __ Goto(&end);                                          \
-    }                                                         \
-  }
+#define HANDLE_CASE(name, lower_case, expected_arg_count)   \
+  __ BIND(&lower_case);                                     \
+  if (FLAG_debug_code && expected_arg_count >= 0) {         \
+    AbortIfArgCountMismatch(expected_arg_count, arg_count); \
+  }                                                         \
+  result.Bind(name(first_arg_reg, arg_count, context));     \
+  __ Goto(&end);
   INTRINSICS_LIST(HANDLE_CASE)
 #undef HANDLE_CASE
 
@@ -339,9 +334,9 @@ Node* IntrinsicsGenerator::Call(Node* args_reg, Node* arg_count,
     __ BIND(&arg_count_positive);
   }
 
-  __ CallJSAndDispatch(function, context, receiver_arg, target_args_count,
-                       ConvertReceiverMode::kAny);
-  return nullptr;  // We never return from the CallJSAndDispatch above.
+  Node* result = __ CallJS(function, context, receiver_arg, target_args_count,
+                           ConvertReceiverMode::kAny);
+  return result;
 }
 
 Node* IntrinsicsGenerator::ClassOf(Node* args_reg, Node* arg_count,
@@ -444,11 +439,6 @@ Node* IntrinsicsGenerator::AsyncGeneratorResolve(Node* input, Node* arg_count,
                                 Builtins::kAsyncGeneratorResolve);
 }
 
-Node* IntrinsicsGenerator::AsyncGeneratorYield(Node* input, Node* arg_count,
-                                               Node* context) {
-  return IntrinsicAsBuiltinCall(input, context, Builtins::kAsyncGeneratorYield);
-}
-
 void IntrinsicsGenerator::AbortIfArgCountMismatch(int expected, Node* actual) {
   InterpreterAssembler::Label match(assembler_);
   Node* comparison = __ Word32Equal(actual, __ Int32Constant(expected));
@@ -457,8 +447,6 @@ void IntrinsicsGenerator::AbortIfArgCountMismatch(int expected, Node* actual) {
   __ Goto(&match);
   __ BIND(&match);
 }
-
-#undef __
 
 }  // namespace interpreter
 }  // namespace internal

@@ -171,7 +171,7 @@ typedef uint16_t float16;
   V_(ImmAddSub, 21, 10, Bits)                           \
   V_(ShiftAddSub, 23, 22, Bits)                         \
                                                         \
-  /* Add/subtract extend */                             \
+  /* Add/substract extend */                            \
   V_(ImmExtendShift, 12, 10, Bits)                      \
   V_(ExtendMode, 15, 13, Bits)                          \
                                                         \

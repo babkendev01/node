@@ -130,9 +130,4 @@ void V8::SetSnapshotBlob(StartupData* snapshot_blob) {
 #endif
 }
 }  // namespace internal
-
-// static
-double Platform::SystemClockTimeMillis() {
-  return base::OS::TimeCurrentMillis();
-}
 }  // namespace v8

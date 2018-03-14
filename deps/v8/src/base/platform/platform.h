@@ -237,7 +237,7 @@ class V8_BASE_EXPORT OS {
   static void StrNCpy(char* dest, int length, const char* src, size_t n);
 
   // Support for the profiler.  Can do nothing, in which case ticks
-  // occurring in shared libraries will not be properly accounted for.
+  // occuring in shared libraries will not be properly accounted for.
   struct SharedLibraryAddress {
     SharedLibraryAddress(const std::string& library_path, uintptr_t start,
                          uintptr_t end)
@@ -285,10 +285,11 @@ class V8_BASE_EXPORT OS {
   DISALLOW_IMPLICIT_CONSTRUCTORS(OS);
 };
 
+
 // Represents and controls an area of reserved memory.
 // Control of the reserved memory can be assigned to another VirtualMemory
-// object by calling TakeControl. This removes the reserved memory from the
-// 'from' instance.
+// object by assignment or copy-contructing. This removes the reserved memory
+// from the original object.
 class V8_BASE_EXPORT VirtualMemory {
  public:
   // Empty VirtualMemory object, controlling no reserved memory.

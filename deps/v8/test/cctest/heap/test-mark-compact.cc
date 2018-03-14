@@ -39,6 +39,7 @@
 
 #include "src/v8.h"
 
+#include "src/full-codegen/full-codegen.h"
 #include "src/global-handles.h"
 #include "src/heap/mark-compact-inl.h"
 #include "src/heap/mark-compact.h"
@@ -48,9 +49,8 @@
 #include "test/cctest/heap/heap-tester.h"
 #include "test/cctest/heap/heap-utils.h"
 
-namespace v8 {
-namespace internal {
-namespace heap {
+using namespace v8::internal;
+using v8::Just;
 
 TEST(SequentialMarkingDeque) {
   CcTest::InitializeVM();
@@ -355,15 +355,10 @@ TEST(Regress5829) {
                              ClearRecordedSlots::kNo);
   heap->old_space()->EmptyAllocationInfo();
   Page* page = Page::FromAddress(array->address());
-  IncrementalMarking::MarkingState* marking_state = marking->marking_state();
   for (auto object_and_size :
-       LiveObjectRange<kGreyObjects>(page, marking_state->bitmap(page))) {
+       LiveObjectRange<kGreyObjects>(page, MarkingState::Internal(page))) {
     CHECK(!object_and_size.first->IsFiller());
   }
 }
 
 #endif  // __linux__ and !USE_SIMULATOR
-
-}  // namespace heap
-}  // namespace internal
-}  // namespace v8

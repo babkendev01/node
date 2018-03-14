@@ -52,10 +52,11 @@ assertEquals(undefined,
              Array.prototype.map.call(new MyNonArray(), ()=>{}).length);
 assertEquals(undefined,
              Array.prototype.filter.call(new MyNonArray(), ()=>{}).length);
-// slice, splice, and concat actually do explicitly define the length.
+assertEquals(undefined,
+             Array.prototype.concat.call(new MyNonArray(), ()=>{}).length);
+// slice and splice actually do explicitly define the length for some reason
 assertEquals(0, Array.prototype.slice.call(new MyNonArray()).length);
 assertEquals(0, Array.prototype.splice.call(new MyNonArray()).length);
-assertEquals(1, Array.prototype.concat.call(new MyNonArray(), ()=>{}).length);
 
 // Cross-realm Arrays build same-realm arrays
 

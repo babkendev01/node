@@ -76,7 +76,7 @@ class OperandSet {
           UNREACHABLE();
           break;
       }
-      const RegisterConfiguration* config = RegisterConfiguration::Default();
+      const RegisterConfiguration* config = RegisterConfiguration::Turbofan();
       int base = -1;
       int aliases =
           config->GetAliases(rep, loc.register_code(), other_rep1, &base);

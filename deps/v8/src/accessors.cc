@@ -11,6 +11,7 @@
 #include "src/factory.h"
 #include "src/frames-inl.h"
 #include "src/isolate-inl.h"
+#include "src/list-inl.h"
 #include "src/messages.h"
 #include "src/property-details.h"
 #include "src/prototype.h"
@@ -104,8 +105,6 @@ void Accessors::ReconfigureToDataProperty(
     v8::Local<v8::Name> key, v8::Local<v8::Value> val,
     const v8::PropertyCallbackInfo<v8::Boolean>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope stats_scope(
-      isolate, &RuntimeCallStats::ReconfigureToDataProperty);
   HandleScope scope(isolate);
   Handle<Object> receiver = Utils::OpenHandle(*info.This());
   Handle<JSObject> holder =
@@ -153,7 +152,8 @@ void Accessors::ArrayLengthGetter(
     v8::Local<v8::Name> name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate, &RuntimeCallStats::ArrayLengthGetter);
+  RuntimeCallTimerScope timer(
+      isolate, &RuntimeCallStats::AccessorNameGetterCallback_ArrayLength);
   DisallowHeapAllocation no_allocation;
   HandleScope scope(isolate);
   JSArray* holder = JSArray::cast(*Utils::OpenHandle(*info.Holder()));
@@ -165,7 +165,6 @@ void Accessors::ArrayLengthSetter(
     v8::Local<v8::Name> name, v8::Local<v8::Value> val,
     const v8::PropertyCallbackInfo<v8::Boolean>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate, &RuntimeCallStats::ArrayLengthSetter);
   HandleScope scope(isolate);
 
   DCHECK(Utils::OpenHandle(*name)->SameValue(isolate->heap()->length_string()));
@@ -283,7 +282,8 @@ void Accessors::StringLengthGetter(
     v8::Local<v8::Name> name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate, &RuntimeCallStats::StringLengthGetter);
+  RuntimeCallTimerScope timer(
+      isolate, &RuntimeCallStats::AccessorNameGetterCallback_StringLength);
   DisallowHeapAllocation no_allocation;
   HandleScope scope(isolate);
 
@@ -681,8 +681,8 @@ void Accessors::FunctionPrototypeGetter(
     v8::Local<v8::Name> name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              &RuntimeCallStats::FunctionPrototypeGetter);
+  RuntimeCallTimerScope timer(
+      isolate, &RuntimeCallStats::AccessorNameGetterCallback_FunctionPrototype);
   HandleScope scope(isolate);
   Handle<JSFunction> function =
       Handle<JSFunction>::cast(Utils::OpenHandle(*info.Holder()));
@@ -694,8 +694,6 @@ void Accessors::FunctionPrototypeSetter(
     v8::Local<v8::Name> name, v8::Local<v8::Value> val,
     const v8::PropertyCallbackInfo<v8::Boolean>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              &RuntimeCallStats::FunctionPrototypeSetter);
   HandleScope scope(isolate);
   Handle<Object> value = Utils::OpenHandle(*val);
   Handle<JSFunction> object =
@@ -781,7 +779,7 @@ static Handle<Object> ArgumentsForInlinedFunction(
   Factory* factory = isolate->factory();
 
   TranslatedState translated_values(frame);
-  translated_values.Prepare(frame->fp());
+  translated_values.Prepare(false, frame->fp());
 
   int argument_count = 0;
   TranslatedFrame* translated_frame =
@@ -821,12 +819,11 @@ static Handle<Object> ArgumentsForInlinedFunction(
 
 static int FindFunctionInFrame(JavaScriptFrame* frame,
                                Handle<JSFunction> function) {
-  std::vector<FrameSummary> frames;
+  DisallowHeapAllocation no_allocation;
+  List<FrameSummary> frames(2);
   frame->Summarize(&frames);
-  for (size_t i = frames.size(); i != 0; i--) {
-    if (*frames[i - 1].AsJavaScript().function() == *function) {
-      return static_cast<int>(i) - 1;
-    }
+  for (int i = frames.length() - 1; i >= 0; i--) {
+    if (*frames[i].AsJavaScript().function() == *function) return i;
   }
   return -1;
 }
@@ -929,78 +926,82 @@ static inline bool AllowAccessToFunction(Context* current_context,
 
 class FrameFunctionIterator {
  public:
-  explicit FrameFunctionIterator(Isolate* isolate)
-      : isolate_(isolate), frame_iterator_(isolate) {
+  FrameFunctionIterator(Isolate* isolate, const DisallowHeapAllocation& promise)
+      : isolate_(isolate), frame_iterator_(isolate), frames_(2), index_(0) {
     GetFrames();
   }
-  MaybeHandle<JSFunction> next() {
+  JSFunction* next() {
     while (true) {
-      if (frames_.empty()) return MaybeHandle<JSFunction>();
-      Handle<JSFunction> next_function =
-          frames_.back().AsJavaScript().function();
-      frames_.pop_back();
-      if (frames_.empty()) {
+      if (frames_.length() == 0) return NULL;
+      JSFunction* next_function = *frames_[index_].AsJavaScript().function();
+      index_--;
+      if (index_ < 0) {
         GetFrames();
       }
       // Skip functions from other origins.
-      if (!AllowAccessToFunction(isolate_->context(), *next_function)) continue;
+      if (!AllowAccessToFunction(isolate_->context(), next_function)) continue;
       return next_function;
     }
   }
 
-  // Iterate through functions until the first occurrence of 'function'.
+  // Iterate through functions until the first occurence of 'function'.
   // Returns true if 'function' is found, and false if the iterator ends
   // without finding it.
-  bool Find(Handle<JSFunction> function) {
-    Handle<JSFunction> next_function;
+  bool Find(JSFunction* function) {
+    JSFunction* next_function;
     do {
-      if (!next().ToHandle(&next_function)) return false;
-    } while (!next_function.is_identical_to(function));
-    return true;
+      next_function = next();
+      if (next_function == function) return true;
+    } while (next_function != NULL);
+    return false;
   }
 
  private:
   void GetFrames() {
-    DCHECK(frames_.empty());
+    frames_.Rewind(0);
     if (frame_iterator_.done()) return;
     JavaScriptFrame* frame = frame_iterator_.frame();
     frame->Summarize(&frames_);
-    DCHECK(!frames_.empty());
+    DCHECK(frames_.length() > 0);
     frame_iterator_.Advance();
+    index_ = frames_.length() - 1;
   }
   Isolate* isolate_;
   JavaScriptFrameIterator frame_iterator_;
-  std::vector<FrameSummary> frames_;
+  List<FrameSummary> frames_;
+  int index_;
 };
 
 
 MaybeHandle<JSFunction> FindCaller(Isolate* isolate,
                                    Handle<JSFunction> function) {
-  FrameFunctionIterator it(isolate);
+  DisallowHeapAllocation no_allocation;
+  FrameFunctionIterator it(isolate, no_allocation);
   if (function->shared()->native()) {
     return MaybeHandle<JSFunction>();
   }
   // Find the function from the frames.
-  if (!it.Find(function)) {
+  if (!it.Find(*function)) {
     // No frame corresponding to the given function found. Return null.
     return MaybeHandle<JSFunction>();
   }
   // Find previously called non-toplevel function.
-  Handle<JSFunction> caller;
+  JSFunction* caller;
   do {
-    if (!it.next().ToHandle(&caller)) return MaybeHandle<JSFunction>();
+    caller = it.next();
+    if (caller == NULL) return MaybeHandle<JSFunction>();
   } while (caller->shared()->is_toplevel());
 
   // If caller is not user code and caller's caller is also not user code,
   // use that instead.
-  MaybeHandle<JSFunction> potential_caller = caller;
-  while (!potential_caller.is_null() &&
-         !potential_caller.ToHandleChecked()->shared()->IsUserJavaScript()) {
-    caller = potential_caller.ToHandleChecked();
+  JSFunction* potential_caller = caller;
+  while (potential_caller != NULL &&
+         !potential_caller->shared()->IsUserJavaScript()) {
+    caller = potential_caller;
     potential_caller = it.next();
   }
-  if (!caller->shared()->native() && !potential_caller.is_null()) {
-    caller = potential_caller.ToHandleChecked();
+  if (!caller->shared()->native() && potential_caller != NULL) {
+    caller = potential_caller;
   }
   // Censor if the caller is not a sloppy mode function.
   // Change from ES5, which used to throw, see:
@@ -1009,10 +1010,10 @@ MaybeHandle<JSFunction> FindCaller(Isolate* isolate,
     return MaybeHandle<JSFunction>();
   }
   // Don't return caller from another security context.
-  if (!AllowAccessToFunction(isolate->context(), *caller)) {
+  if (!AllowAccessToFunction(isolate->context(), caller)) {
     return MaybeHandle<JSFunction>();
   }
-  return caller;
+  return Handle<JSFunction>(caller);
 }
 
 
@@ -1050,8 +1051,9 @@ Handle<AccessorInfo> Accessors::FunctionCallerInfo(
 void Accessors::BoundFunctionLengthGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              &RuntimeCallStats::BoundFunctionLengthGetter);
+  RuntimeCallTimerScope timer(
+      isolate,
+      &RuntimeCallStats::AccessorNameGetterCallback_BoundFunctionLength);
   HandleScope scope(isolate);
   Handle<JSBoundFunction> function =
       Handle<JSBoundFunction>::cast(Utils::OpenHandle(*info.Holder()));
@@ -1086,8 +1088,8 @@ Handle<AccessorInfo> Accessors::BoundFunctionLengthInfo(
 void Accessors::BoundFunctionNameGetter(
     v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(info.GetIsolate());
-  RuntimeCallTimerScope timer(isolate,
-                              &RuntimeCallStats::BoundFunctionNameGetter);
+  RuntimeCallTimerScope timer(
+      isolate, &RuntimeCallStats::AccessorNameGetterCallback_BoundFunctionName);
   HandleScope scope(isolate);
   Handle<JSBoundFunction> function =
       Handle<JSBoundFunction>::cast(Utils::OpenHandle(*info.Holder()));

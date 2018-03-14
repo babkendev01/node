@@ -207,7 +207,7 @@ var testCasesPDT = [
 
 // Local time cases.
 var testCasesLocalTime = [
-    // Allow timezone omission.
+    // Allow timezone ommision.
     'Sat, 01-Jan-2000 08:00:00',
     'Sat, 01 Jan 2000 08:00:00',
     'Jan 01 2000 08:00:00',

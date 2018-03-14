@@ -67,13 +67,13 @@ void MergeControlToEnd(JSGraph* jsgraph, Node* node) {
 }  // namespace
 
 WasmGraphBuilder::WasmGraphBuilder(
-    ModuleEnv* env, Zone* zone, JSGraph* jsgraph, Handle<Code> centry_stub,
-    wasm::FunctionSig* sig,
+    wasm::ModuleEnv* module_env, Zone* zone, JSGraph* jsgraph,
+    Handle<Code> centry_stub, wasm::FunctionSig* sig,
     compiler::SourcePositionTable* source_position_table)
     : zone_(zone),
       jsgraph_(jsgraph),
       centry_stub_node_(jsgraph_->HeapConstant(centry_stub)),
-      env_(env),
+      module_(module_env),
       signature_tables_(zone),
       function_tables_(zone),
       function_table_sizes_(zone),
@@ -192,11 +192,10 @@ Node* WasmGraphBuilder::Int64Constant(int64_t value) {
 
 void WasmGraphBuilder::StackCheck(wasm::WasmCodePosition position,
                                   Node** effect, Node** control) {
-  // TODO(mtrofin): "!env_" happens when we generate a wrapper.
-  // We should factor wrappers separately from wasm codegen.
-  if (FLAG_wasm_no_stack_checks || !env_ || !has_runtime_exception_support_) {
+  if (FLAG_wasm_no_stack_checks) return;
+  // We do not generate stack checks for cctests.
+  if (!module_ || (module_->instance && module_->instance->context.is_null()))
     return;
-  }
   if (effect == nullptr) effect = effect_;
   if (control == nullptr) control = control_;
 
@@ -214,7 +213,7 @@ void WasmGraphBuilder::StackCheck(wasm::WasmCodePosition position,
   Diamond stack_check(graph(), jsgraph()->common(), check, BranchHint::kTrue);
   stack_check.Chain(*control);
 
-  Handle<Code> code = BUILTIN_CODE(jsgraph()->isolate(), WasmStackGuard);
+  Handle<Code> code = jsgraph()->isolate()->builtins()->WasmStackGuard();
   CallInterfaceDescriptor idesc =
       WasmRuntimeCallDescriptor(jsgraph()->isolate());
   CallDescriptor* desc = Linkage::GetStubCallDescriptor(
@@ -829,8 +828,9 @@ Node* WasmGraphBuilder::BranchExpectFalse(Node* cond, Node** true_node,
                 BranchHint::kFalse);
 }
 
-Builtins::Name WasmGraphBuilder::GetBuiltinIdForTrap(wasm::TrapReason reason) {
-  if (!has_runtime_exception_support_) {
+namespace {
+Builtins::Name GetBuiltinIdForTrap(bool in_cctest, wasm::TrapReason reason) {
+  if (in_cctest) {
     // We use Builtins::builtin_count as a marker to tell the code generator
     // to generate a call to a testing c-function instead of a runtime
     // function. This code should only be called from a cctest.
@@ -847,10 +847,14 @@ Builtins::Name WasmGraphBuilder::GetBuiltinIdForTrap(wasm::TrapReason reason) {
       UNREACHABLE();
   }
 }
+}  // namespace
 
 Node* WasmGraphBuilder::TrapIfTrue(wasm::TrapReason reason, Node* cond,
                                    wasm::WasmCodePosition position) {
-  Builtins::Name trap_id = GetBuiltinIdForTrap(reason);
+  // TODO(wasm): Introduce a testing flag instead of trying to infer it here.
+  bool in_cctest =
+      !module_ || (module_->instance && module_->instance->context.is_null());
+  int32_t trap_id = GetBuiltinIdForTrap(in_cctest, reason);
   Node* node = graph()->NewNode(jsgraph()->common()->TrapIf(trap_id), cond,
                                 Effect(), Control());
   *control_ = node;
@@ -860,7 +864,10 @@ Node* WasmGraphBuilder::TrapIfTrue(wasm::TrapReason reason, Node* cond,
 
 Node* WasmGraphBuilder::TrapIfFalse(wasm::TrapReason reason, Node* cond,
                                     wasm::WasmCodePosition position) {
-  Builtins::Name trap_id = GetBuiltinIdForTrap(reason);
+  // TODO(wasm): Introduce a testing flag instead of trying to infer it here.
+  bool in_cctest =
+      !module_ || (module_->instance && module_->instance->context.is_null());
+  int32_t trap_id = GetBuiltinIdForTrap(in_cctest, reason);
 
   Node* node = graph()->NewNode(jsgraph()->common()->TrapUnless(trap_id), cond,
                                 Effect(), Control());
@@ -1808,26 +1815,68 @@ Node* WasmGraphBuilder::GrowMemory(Node* input) {
 
 Node* WasmGraphBuilder::Throw(Node* input) {
   SetNeedsStackCheck();
-  Node* parameters[] = {BuildChangeInt32ToSmi(input)};
+  MachineOperatorBuilder* machine = jsgraph()->machine();
+
+  // Pass the thrown value as two SMIs:
+  //
+  // upper = static_cast<uint32_t>(input) >> 16;
+  // lower = input & 0xFFFF;
+  //
+  // This is needed because we can't safely call BuildChangeInt32ToTagged from
+  // this method.
+  //
+  // TODO(wasm): figure out how to properly pass this to the runtime function.
+  Node* upper = BuildChangeInt32ToSmi(
+      graph()->NewNode(machine->Word32Shr(), input, Int32Constant(16)));
+  Node* lower = BuildChangeInt32ToSmi(
+      graph()->NewNode(machine->Word32And(), input, Int32Constant(0xFFFFu)));
+
+  Node* parameters[] = {lower, upper};  // thrown value
   return BuildCallToRuntime(Runtime::kWasmThrow, parameters,
                             arraysize(parameters));
 }
 
-Node* WasmGraphBuilder::Rethrow() {
-  SetNeedsStackCheck();
-  Node* result = BuildCallToRuntime(Runtime::kWasmRethrow, nullptr, 0);
-  return result;
-}
-
 Node* WasmGraphBuilder::Catch(Node* input, wasm::WasmCodePosition position) {
   SetNeedsStackCheck();
+  CommonOperatorBuilder* common = jsgraph()->common();
+
   Node* parameters[] = {input};  // caught value
-  Node* value = BuildCallToRuntime(Runtime::kWasmSetCaughtExceptionValue,
+  Node* value = BuildCallToRuntime(Runtime::kWasmGetCaughtExceptionValue,
                                    parameters, arraysize(parameters));
-  parameters[0] = value;
-  value = BuildCallToRuntime(Runtime::kWasmGetExceptionTag, parameters,
-                             arraysize(parameters));
-  return BuildChangeSmiToInt32(value);
+
+  Node* is_smi;
+  Node* is_heap;
+  BranchExpectFalse(BuildTestNotSmi(value), &is_heap, &is_smi);
+
+  // is_smi
+  Node* smi_i32 = BuildChangeSmiToInt32(value);
+  Node* is_smi_effect = *effect_;
+
+  // is_heap
+  *control_ = is_heap;
+  Node* heap_f64 = BuildLoadHeapNumberValue(value, is_heap);
+
+  // *control_ needs to point to the current control dependency (is_heap) in
+  // case BuildI32SConvertF64 needs to insert nodes that depend on the "current"
+  // control node.
+  Node* heap_i32 = BuildI32SConvertF64(heap_f64, position);
+  // *control_ contains the control node that should be used when merging the
+  // result for the catch clause. It may be different than *control_ because
+  // BuildI32SConvertF64 may introduce a new control node (used for trapping if
+  // heap_f64 cannot be converted to an i32.
+  is_heap = *control_;
+  Node* is_heap_effect = *effect_;
+
+  Node* merge = graph()->NewNode(common->Merge(2), is_heap, is_smi);
+  Node* effect_merge = graph()->NewNode(common->EffectPhi(2), is_heap_effect,
+                                        is_smi_effect, merge);
+
+  Node* value_i32 = graph()->NewNode(
+      common->Phi(MachineRepresentation::kWord32, 2), heap_i32, smi_i32, merge);
+
+  *control_ = merge;
+  *effect_ = effect_merge;
+  return value_i32;
 }
 
 Node* WasmGraphBuilder::BuildI32DivS(Node* left, Node* right,
@@ -2225,13 +2274,13 @@ Node* WasmGraphBuilder::CallDirect(uint32_t index, Node** args, Node*** rets,
   DCHECK_NULL(args[0]);
 
   // Add code object as constant.
-  Handle<Code> code = index < env_->function_code.size()
-                          ? env_->function_code[index]
-                          : env_->default_function_code;
-
+  // TODO(wasm): Always use the illegal builtin, except for testing.
+  Handle<Code> code = module_->instance
+                          ? module_->GetFunctionCode(index)
+                          : jsgraph()->isolate()->builtins()->Illegal();
   DCHECK(!code.is_null());
   args[0] = HeapConstant(code);
-  wasm::FunctionSig* sig = env_->module->functions[index].sig;
+  wasm::FunctionSig* sig = module_->GetFunctionSignature(index);
 
   return BuildWasmCall(sig, args, rets, position);
 }
@@ -2240,11 +2289,13 @@ Node* WasmGraphBuilder::CallIndirect(uint32_t sig_index, Node** args,
                                      Node*** rets,
                                      wasm::WasmCodePosition position) {
   DCHECK_NOT_NULL(args[0]);
-  DCHECK_NOT_NULL(env_);
+  DCHECK_NOT_NULL(module_);
 
   // Assume only one table for now.
   uint32_t table_index = 0;
-  wasm::FunctionSig* sig = env_->module->signatures[sig_index];
+  wasm::FunctionSig* sig = module_->GetSignature(sig_index);
+
+  DCHECK(module_->IsValidTable(table_index));
 
   EnsureFunctionTableNodes();
   MachineOperatorBuilder* machine = jsgraph()->machine();
@@ -2254,14 +2305,9 @@ Node* WasmGraphBuilder::CallIndirect(uint32_t sig_index, Node** args,
   Node* size = function_table_sizes_[table_index];
   Node* in_bounds = graph()->NewNode(machine->Uint32LessThan(), key, size);
   TrapIfFalse(wasm::kTrapFuncInvalid, in_bounds, position);
-  Node* table_address = function_tables_[table_index];
-  Node* table = graph()->NewNode(
-      jsgraph()->machine()->Load(MachineType::AnyTagged()), table_address,
-      jsgraph()->IntPtrConstant(0), *effect_, *control_);
-  Node* signatures_address = signature_tables_[table_index];
-  Node* signatures = graph()->NewNode(
-      jsgraph()->machine()->Load(MachineType::AnyTagged()), signatures_address,
-      jsgraph()->IntPtrConstant(0), *effect_, *control_);
+  Node* table = function_tables_[table_index];
+  Node* signatures = signature_tables_[table_index];
+
   // Load signature from the table and check.
   // The table is a FixedArray; signatures are encoded as SMIs.
   // [sig1, sig2, sig3, ...., code1, code2, code3 ...]
@@ -2275,10 +2321,11 @@ Node* WasmGraphBuilder::CallIndirect(uint32_t sig_index, Node** args,
                                           Int32Constant(kPointerSizeLog2)),
                          Int32Constant(fixed_offset)),
         *effect_, *control_);
-    auto map = env_->signature_maps[table_index];
+    auto& map = const_cast<wasm::SignatureMap&>(
+        module_->module->function_tables[0].map);
     Node* sig_match = graph()->NewNode(
         machine->WordEqual(), load_sig,
-        jsgraph()->SmiConstant(static_cast<int>(map->FindOrInsert(sig))));
+        jsgraph()->SmiConstant(static_cast<int>(map.FindOrInsert(sig))));
     TrapIfFalse(wasm::kTrapFuncSigMismatch, sig_match, position);
   }
 
@@ -2624,8 +2671,9 @@ Node* WasmGraphBuilder::BuildHeapNumberValueIndexConstant() {
   return jsgraph()->IntPtrConstant(HeapNumber::kValueOffset - kHeapObjectTag);
 }
 
-void WasmGraphBuilder::BuildJSToWasmWrapper(Handle<Code> wasm_code) {
-  int wasm_count = static_cast<int>(sig_->parameter_count());
+void WasmGraphBuilder::BuildJSToWasmWrapper(Handle<Code> wasm_code,
+                                            wasm::FunctionSig* sig) {
+  int wasm_count = static_cast<int>(sig->parameter_count());
   int count = wasm_count + 3;
   Node** args = Buffer(count);
 
@@ -2673,7 +2721,7 @@ void WasmGraphBuilder::BuildJSToWasmWrapper(Handle<Code> wasm_code) {
   // Convert JS parameters to wasm numbers.
   for (int i = 0; i < wasm_count; ++i) {
     Node* param = Param(i + 1);
-    Node* wasm_param = FromJS(param, context, sig_->GetParam(i));
+    Node* wasm_param = FromJS(param, context, sig->GetParam(i));
     args[pos++] = wasm_param;
   }
 
@@ -2681,7 +2729,7 @@ void WasmGraphBuilder::BuildJSToWasmWrapper(Handle<Code> wasm_code) {
   args[pos++] = *control_;
 
   // Call the wasm code.
-  CallDescriptor* desc = GetWasmCallDescriptor(jsgraph()->zone(), sig_);
+  CallDescriptor* desc = GetWasmCallDescriptor(jsgraph()->zone(), sig);
 
   Node* call = graph()->NewNode(jsgraph()->common()->Call(desc), count, args);
   *effect_ = call;
@@ -2691,24 +2739,26 @@ void WasmGraphBuilder::BuildJSToWasmWrapper(Handle<Code> wasm_code) {
 
   Node* retval = call;
   Node* jsval = ToJS(
-      retval, sig_->return_count() == 0 ? wasm::kWasmStmt : sig_->GetReturn());
+      retval, sig->return_count() == 0 ? wasm::kWasmStmt : sig->GetReturn());
   Return(jsval);
 }
 
 int WasmGraphBuilder::AddParameterNodes(Node** args, int pos, int param_count,
                                         wasm::FunctionSig* sig) {
   // Convert wasm numbers to JS values.
+  int param_index = 0;
   for (int i = 0; i < param_count; ++i) {
-    Node* param = Param(i);
+    Node* param = Param(param_index++);
     args[pos++] = ToJS(param, sig->GetParam(i));
   }
   return pos;
 }
 
-void WasmGraphBuilder::BuildWasmToJSWrapper(Handle<JSReceiver> target) {
+void WasmGraphBuilder::BuildWasmToJSWrapper(Handle<JSReceiver> target,
+                                            wasm::FunctionSig* sig) {
   DCHECK(target->IsCallable());
 
-  int wasm_count = static_cast<int>(sig_->parameter_count());
+  int wasm_count = static_cast<int>(sig->parameter_count());
 
   // Build the start and the parameter nodes.
   Isolate* isolate = jsgraph()->isolate();
@@ -2755,7 +2805,7 @@ void WasmGraphBuilder::BuildWasmToJSWrapper(Handle<JSReceiver> target) {
           graph()->zone(), false, wasm_count + 1, CallDescriptor::kNoFlags);
 
       // Convert wasm numbers to JS values.
-      pos = AddParameterNodes(args, pos, wasm_count, sig_);
+      pos = AddParameterNodes(args, pos, wasm_count, sig);
 
       args[pos++] = jsgraph()->UndefinedConstant();        // new target
       args[pos++] = jsgraph()->Int32Constant(wasm_count);  // argument count
@@ -2782,7 +2832,7 @@ void WasmGraphBuilder::BuildWasmToJSWrapper(Handle<JSReceiver> target) {
                                           CallDescriptor::kNoFlags);
 
     // Convert wasm numbers to JS values.
-    pos = AddParameterNodes(args, pos, wasm_count, sig_);
+    pos = AddParameterNodes(args, pos, wasm_count, sig);
 
     // The native_context is sufficient here, because all kind of callables
     // which depend on the context provide their own context. The context here
@@ -2802,25 +2852,20 @@ void WasmGraphBuilder::BuildWasmToJSWrapper(Handle<JSReceiver> target) {
   BuildModifyThreadInWasmFlag(true);
 
   // Convert the return value back.
-  Node* val = sig_->return_count() == 0
+  Node* val = sig->return_count() == 0
                   ? jsgraph()->Int32Constant(0)
                   : FromJS(call, HeapConstant(isolate->native_context()),
-                           sig_->GetReturn());
+                           sig->GetReturn());
   Return(val);
 }
 
-namespace {
-bool HasInt64ParamOrReturn(wasm::FunctionSig* sig) {
-  for (auto type : sig->all()) {
-    if (type == wasm::kWasmI64) return true;
-  }
-  return false;
-}
-}  // namespace
-
 void WasmGraphBuilder::BuildWasmInterpreterEntry(
-    uint32_t function_index, Handle<WasmInstanceObject> instance) {
-  int param_count = static_cast<int>(sig_->parameter_count());
+    uint32_t function_index, wasm::FunctionSig* sig,
+    Handle<WasmInstanceObject> instance) {
+  int wasm_count = static_cast<int>(sig->parameter_count());
+  int param_count = jsgraph()->machine()->Is64()
+                        ? wasm_count
+                        : Int64Lowering::GetParameterCountAfterLowering(sig);
 
   // Build the start and the parameter nodes.
   Node* start = Start(param_count + 3);
@@ -2829,16 +2874,16 @@ void WasmGraphBuilder::BuildWasmInterpreterEntry(
 
   // Compute size for the argument buffer.
   int args_size_bytes = 0;
-  for (wasm::ValueType type : sig_->parameters()) {
-    args_size_bytes += 1 << ElementSizeLog2Of(type);
+  for (int i = 0; i < wasm_count; i++) {
+    args_size_bytes += 1 << ElementSizeLog2Of(sig->GetParam(i));
   }
 
   // The return value is also passed via this buffer:
-  DCHECK_GE(wasm::kV8MaxWasmFunctionReturns, sig_->return_count());
+  DCHECK_GE(wasm::kV8MaxWasmFunctionReturns, sig->return_count());
   // TODO(wasm): Handle multi-value returns.
   DCHECK_EQ(1, wasm::kV8MaxWasmFunctionReturns);
   int return_size_bytes =
-      sig_->return_count() == 0 ? 0 : 1 << ElementSizeLog2Of(sig_->GetReturn());
+      sig->return_count() == 0 ? 0 : 1 << ElementSizeLog2Of(sig->GetReturn(0));
 
   // Get a stack slot for the arguments.
   Node* arg_buffer =
@@ -2848,15 +2893,35 @@ void WasmGraphBuilder::BuildWasmInterpreterEntry(
                 std::max(args_size_bytes, return_size_bytes), 8));
 
   // Now store all our arguments to the buffer.
+  int param_index = 0;
   int offset = 0;
 
-  for (int i = 0; i < param_count; ++i) {
-    wasm::ValueType type = sig_->GetParam(i);
-    *effect_ =
-        graph()->NewNode(GetSafeStoreOperator(offset, type), arg_buffer,
-                         Int32Constant(offset), Param(i), *effect_, *control_);
-    offset += 1 << ElementSizeLog2Of(type);
+  for (int i = 0; i < wasm_count; i++) {
+    Node* param = Param(param_index++);
+    if (Int64Lowering::IsI64AsTwoParameters(jsgraph()->machine(),
+                                            sig->GetParam(i))) {
+      int lower_half_offset = offset + kInt64LowerHalfMemoryOffset;
+      int upper_half_offset = offset + kInt64UpperHalfMemoryOffset;
+
+      *effect_ = graph()->NewNode(
+          GetSafeStoreOperator(lower_half_offset, wasm::kWasmI32), arg_buffer,
+          Int32Constant(lower_half_offset), param, *effect_, *control_);
+
+      param = Param(param_index++);
+      *effect_ = graph()->NewNode(
+          GetSafeStoreOperator(upper_half_offset, wasm::kWasmI32), arg_buffer,
+          Int32Constant(upper_half_offset), param, *effect_, *control_);
+      offset += 8;
+
+    } else {
+      MachineRepresentation param_rep = sig->GetParam(i);
+      *effect_ =
+          graph()->NewNode(GetSafeStoreOperator(offset, param_rep), arg_buffer,
+                           Int32Constant(offset), param, *effect_, *control_);
+      offset += 1 << ElementSizeLog2Of(param_rep);
+    }
   }
+  DCHECK_EQ(param_count, param_index);
   DCHECK_EQ(args_size_bytes, offset);
 
   // We are passing the raw arg_buffer here. To the GC and other parts, it looks
@@ -2871,93 +2936,34 @@ void WasmGraphBuilder::BuildWasmInterpreterEntry(
                      arraysize(parameters));
 
   // Read back the return value.
-  if (sig_->return_count() == 0) {
+  if (sig->return_count() == 0) {
     Return(Int32Constant(0));
+  } else if (Int64Lowering::IsI64AsTwoParameters(jsgraph()->machine(),
+                                                 sig->GetReturn())) {
+    MachineType load_rep = wasm::WasmOpcodes::MachineTypeFor(wasm::kWasmI32);
+    Node* lower =
+        graph()->NewNode(jsgraph()->machine()->Load(load_rep), arg_buffer,
+                         Int32Constant(kInt64LowerHalfMemoryOffset), *effect_,
+                         *control_);
+    Node* upper =
+        graph()->NewNode(jsgraph()->machine()->Load(load_rep), arg_buffer,
+                         Int32Constant(kInt64UpperHalfMemoryOffset), lower,
+                         *control_);
+    *effect_ = upper;
+    Return(lower, upper);
   } else {
-    // TODO(wasm): Implement multi-return.
-    DCHECK_EQ(1, sig_->return_count());
-    MachineType load_rep = wasm::WasmOpcodes::MachineTypeFor(sig_->GetReturn());
+    MachineType load_rep = wasm::WasmOpcodes::MachineTypeFor(sig->GetReturn());
     Node* val =
         graph()->NewNode(jsgraph()->machine()->Load(load_rep), arg_buffer,
                          Int32Constant(0), *effect_, *control_);
     Return(val);
   }
-
-  if (HasInt64ParamOrReturn(sig_)) LowerInt64();
-}
-
-void WasmGraphBuilder::BuildCWasmEntry() {
-  // Build the start and the JS parameter nodes.
-  Node* start = Start(CWasmEntryParameters::kNumParameters + 5);
-  *control_ = start;
-  *effect_ = start;
-
-  // Create parameter nodes (offset by 1 for the receiver parameter).
-  Node* code_obj = Param(CWasmEntryParameters::kCodeObject + 1);
-  Node* arg_buffer = Param(CWasmEntryParameters::kArgumentsBuffer + 1);
-
-  // Set the ThreadInWasm flag before we do the actual call.
-  BuildModifyThreadInWasmFlag(true);
-
-  int wasm_arg_count = static_cast<int>(sig_->parameter_count());
-  int arg_count = wasm_arg_count + 3;  // args + code, control, effect
-  Node** args = Buffer(arg_count);
-
-  int pos = 0;
-  args[pos++] = code_obj;
-
-  int offset = 0;
-  for (wasm::ValueType type : sig_->parameters()) {
-    Node* arg_load =
-        graph()->NewNode(GetSafeLoadOperator(offset, type), arg_buffer,
-                         Int32Constant(offset), *effect_, *control_);
-    *effect_ = arg_load;
-    args[pos++] = arg_load;
-    offset += 1 << ElementSizeLog2Of(type);
-  }
-
-  args[pos++] = *effect_;
-  args[pos++] = *control_;
-  DCHECK_EQ(arg_count, pos);
-
-  // Call the wasm code.
-  CallDescriptor* desc = GetWasmCallDescriptor(jsgraph()->zone(), sig_);
-
-  Node* call =
-      graph()->NewNode(jsgraph()->common()->Call(desc), arg_count, args);
-  *effect_ = call;
-
-  // Clear the ThreadInWasmFlag
-  BuildModifyThreadInWasmFlag(false);
-
-  // Store the return value.
-  DCHECK_GE(1, sig_->return_count());
-  if (sig_->return_count() == 1) {
-    StoreRepresentation store_rep(sig_->GetReturn(), kNoWriteBarrier);
-    Node* store =
-        graph()->NewNode(jsgraph()->machine()->Store(store_rep), arg_buffer,
-                         Int32Constant(0), call, *effect_, *control_);
-    *effect_ = store;
-  }
-  Return(jsgraph()->SmiConstant(0));
-
-  if (jsgraph()->machine()->Is32() && HasInt64ParamOrReturn(sig_)) {
-    MachineRepresentation sig_reps[] = {
-        MachineRepresentation::kWord32,  // return value
-        MachineRepresentation::kTagged,  // receiver
-        MachineRepresentation::kTagged,  // arg0 (code)
-        MachineRepresentation::kTagged   // arg1 (buffer)
-    };
-    wasm::FunctionSig c_entry_sig(1, 2, sig_reps);
-    Int64Lowering r(jsgraph()->graph(), jsgraph()->machine(),
-                    jsgraph()->common(), jsgraph()->zone(), &c_entry_sig);
-    r.LowerGraph();
-  }
 }
 
 Node* WasmGraphBuilder::MemBuffer(uint32_t offset) {
-  DCHECK_NOT_NULL(env_);
-  const uintptr_t mem_start = static_cast<const uintptr_t>(env_->mem_start);
+  DCHECK_NOT_NULL(module_);
+  uintptr_t mem_start = reinterpret_cast<uintptr_t>(
+      module_->instance ? module_->instance->mem_start : nullptr);
   if (offset == 0) {
     if (!mem_buffer_) {
       mem_buffer_ = jsgraph()->RelocatableIntPtrConstant(
@@ -2973,7 +2979,7 @@ Node* WasmGraphBuilder::MemBuffer(uint32_t offset) {
 
 Node* WasmGraphBuilder::CurrentMemoryPages() {
   // CurrentMemoryPages can not be called from asm.js.
-  DCHECK_EQ(wasm::kWasmOrigin, env_->module->origin());
+  DCHECK_EQ(wasm::kWasmOrigin, module_->module->origin());
   SetNeedsStackCheck();
   Node* call = BuildCallToRuntime(Runtime::kWasmMemorySize, nullptr, 0);
   Node* result = BuildChangeSmiToInt32(call);
@@ -2981,9 +2987,9 @@ Node* WasmGraphBuilder::CurrentMemoryPages() {
 }
 
 Node* WasmGraphBuilder::MemSize() {
-  DCHECK_NOT_NULL(env_);
+  DCHECK_NOT_NULL(module_);
   if (mem_size_) return mem_size_;
-  uint32_t size = env_->mem_size;
+  uint32_t size = module_->instance ? module_->instance->mem_size : 0;
   mem_size_ = jsgraph()->RelocatableInt32Constant(
       size, RelocInfo::WASM_MEMORY_SIZE_REFERENCE);
   return mem_size_;
@@ -2991,19 +2997,17 @@ Node* WasmGraphBuilder::MemSize() {
 
 void WasmGraphBuilder::EnsureFunctionTableNodes() {
   if (function_tables_.size() > 0) return;
-  size_t tables_size = env_->function_tables.size();
+  size_t tables_size = module_->module->function_tables.size();
+  if (module_->instance) {
+    DCHECK_EQ(tables_size, module_->instance->function_tables.size());
+    DCHECK_EQ(tables_size, module_->instance->signature_tables.size());
+  }
   for (size_t i = 0; i < tables_size; ++i) {
-    wasm::GlobalHandleAddress function_handle_address =
-        env_->function_tables[i];
-    wasm::GlobalHandleAddress signature_handle_address =
-        env_->signature_tables[i];
-    function_tables_.push_back(jsgraph()->RelocatableIntPtrConstant(
-        reinterpret_cast<intptr_t>(function_handle_address),
-        RelocInfo::WASM_GLOBAL_HANDLE));
-    signature_tables_.push_back(jsgraph()->RelocatableIntPtrConstant(
-        reinterpret_cast<intptr_t>(signature_handle_address),
-        RelocInfo::WASM_GLOBAL_HANDLE));
-    uint32_t table_size = env_->module->function_tables[i].initial_size;
+    auto function_handle = (*module_->function_tables)[i];
+    auto signature_handle = (*module_->signature_tables)[i];
+    function_tables_.push_back(HeapConstant(function_handle));
+    signature_tables_.push_back(HeapConstant(signature_handle));
+    uint32_t table_size = module_->module->function_tables[i].min_size;
     function_table_sizes_.push_back(jsgraph()->RelocatableInt32Constant(
         static_cast<uint32_t>(table_size),
         RelocInfo::WASM_FUNCTION_TABLE_SIZE_REFERENCE));
@@ -3013,10 +3017,6 @@ void WasmGraphBuilder::EnsureFunctionTableNodes() {
 Node* WasmGraphBuilder::BuildModifyThreadInWasmFlag(bool new_value) {
   // TODO(eholk): generate code to modify the thread-local storage directly,
   // rather than calling the runtime.
-  //
-  // Note that the runtime functions also toggle the wasm_execution_time
-  // counters. Make sure this behavior is preserved if we avoid the runtime
-  // call.
   if (!trap_handler::UseTrapHandler()) {
     return *control_;
   }
@@ -3101,9 +3101,11 @@ Node* WasmGraphBuilder::BuildCallToRuntime(Runtime::FunctionId f,
 
 Node* WasmGraphBuilder::GetGlobal(uint32_t index) {
   MachineType mem_type =
-      wasm::WasmOpcodes::MachineTypeFor(env_->module->globals[index].type);
-  uintptr_t global_addr =
-      env_->globals_start + env_->module->globals[index].offset;
+      wasm::WasmOpcodes::MachineTypeFor(module_->GetGlobalType(index));
+  byte* globals_start =
+      module_->instance ? module_->instance->globals_start : nullptr;
+  uintptr_t global_addr = reinterpret_cast<uintptr_t>(
+      globals_start + module_->module->globals[index].offset);
   Node* addr = jsgraph()->RelocatableIntPtrConstant(
       global_addr, RelocInfo::WASM_GLOBAL_REFERENCE);
   const Operator* op = jsgraph()->machine()->Load(mem_type);
@@ -3115,11 +3117,13 @@ Node* WasmGraphBuilder::GetGlobal(uint32_t index) {
 
 Node* WasmGraphBuilder::SetGlobal(uint32_t index, Node* val) {
   MachineType mem_type =
-      wasm::WasmOpcodes::MachineTypeFor(env_->module->globals[index].type);
-  uintptr_t global_addr =
-      env_->globals_start + env_->module->globals[index].offset;
+      wasm::WasmOpcodes::MachineTypeFor(module_->GetGlobalType(index));
+  byte* globals_start =
+      module_->instance ? module_->instance->globals_start : 0;
   Node* addr = jsgraph()->RelocatableIntPtrConstant(
-      global_addr, RelocInfo::WASM_GLOBAL_REFERENCE);
+      reinterpret_cast<uintptr_t>(globals_start +
+                                  module_->module->globals[index].offset),
+      RelocInfo::WASM_GLOBAL_REFERENCE);
   const Operator* op = jsgraph()->machine()->Store(
       StoreRepresentation(mem_type.representation(), kNoWriteBarrier));
   Node* node = graph()->NewNode(op, addr, jsgraph()->Int32Constant(0), val,
@@ -3132,50 +3136,50 @@ void WasmGraphBuilder::BoundsCheckMem(MachineType memtype, Node* index,
                                       uint32_t offset,
                                       wasm::WasmCodePosition position) {
   if (FLAG_wasm_no_bounds_checks) return;
+  uint32_t size =
+      module_ && module_->instance ? module_->instance->mem_size : 0;
+  byte memsize = wasm::WasmOpcodes::MemSize(memtype);
 
-  uint64_t min_size = static_cast<uint64_t>(env_->module->initial_pages) *
-                      wasm::WasmModule::kPageSize;
-  uint64_t max_size = static_cast<uint64_t>(env_->module->has_maximum_pages
-                                                ? env_->module->maximum_pages
-                                                : wasm::kV8MaxWasmMemoryPages) *
-                      wasm::WasmModule::kPageSize;
+  size_t effective_size;
+  if (size <= offset || size < (static_cast<uint64_t>(offset) + memsize)) {
+    // Two checks are needed in the case where the offset is statically
+    // out of bounds; one check for the offset being in bounds, and the next for
+    // the offset + index being out of bounds for code to be patched correctly
+    // on relocation.
 
-  byte access_size = wasm::WasmOpcodes::MemSize(memtype);
+    // Check for overflows.
+    if ((std::numeric_limits<uint32_t>::max() - memsize) + 1 < offset) {
+      // Always trap. Do not use TrapAlways because it does not create a valid
+      // graph here.
+      TrapIfEq32(wasm::kTrapMemOutOfBounds, jsgraph()->Int32Constant(0), 0,
+                 position);
+      return;
+    }
+    size_t effective_offset = (offset - 1) + memsize;
 
-  uint64_t end_offset = static_cast<uint64_t>(offset) + access_size;
-  if (end_offset > max_size) {
-    // The access will be out of bounds, even for the largest memory.
-    TrapIfEq32(wasm::kTrapMemOutOfBounds, jsgraph()->Int32Constant(0), 0,
-               position);
-    return;
-  }
-
-  if (end_offset > min_size) {
-    // The end offset is larger than the smallest memory.
-    // Dynamically check the end offset against the actual memory size, which
-    // is not known at compile time.
-    Node* cond = graph()->NewNode(
-        jsgraph()->machine()->Uint32LessThanOrEqual(),
-        jsgraph()->IntPtrConstant(static_cast<uintptr_t>(end_offset)),
-        jsgraph()->RelocatableInt32Constant(
-            static_cast<uint32_t>(env_->mem_size),
-            RelocInfo::WASM_MEMORY_SIZE_REFERENCE));
+    Node* cond = graph()->NewNode(jsgraph()->machine()->Uint32LessThan(),
+                                  jsgraph()->IntPtrConstant(effective_offset),
+                                  jsgraph()->RelocatableInt32Constant(
+                                      static_cast<uint32_t>(size),
+                                      RelocInfo::WASM_MEMORY_SIZE_REFERENCE));
     TrapIfFalse(wasm::kTrapMemOutOfBounds, cond, position);
+    // For offset > effective size, this relies on check above to fail and
+    // effective size can be negative, relies on wrap around.
+    effective_size = size - offset - memsize + 1;
   } else {
-    // The end offset is within the bounds of the smallest memory, so only
-    // one check is required. Check to see if the index is also a constant.
+    effective_size = size - offset - memsize + 1;
+    CHECK(effective_size <= kMaxUInt32);
+
     Uint32Matcher m(index);
     if (m.HasValue()) {
-      uint64_t index_val = m.Value();
-      if ((index_val + offset + access_size) <= min_size) {
-        // The input index is a constant and everything is statically within
-        // bounds of the smallest possible memory.
+      uint32_t value = m.Value();
+      if (value < effective_size) {
+        // The bounds check will always succeed.
         return;
       }
     }
   }
 
-  uint64_t effective_size = env_->mem_size - (end_offset - 1);
   Node* cond = graph()->NewNode(jsgraph()->machine()->Uint32LessThan(), index,
                                 jsgraph()->RelocatableInt32Constant(
                                     static_cast<uint32_t>(effective_size),
@@ -3183,20 +3187,11 @@ void WasmGraphBuilder::BoundsCheckMem(MachineType memtype, Node* index,
   TrapIfFalse(wasm::kTrapMemOutOfBounds, cond, position);
 }
 
-const Operator* WasmGraphBuilder::GetSafeLoadOperator(int offset,
-                                                      wasm::ValueType type) {
-  int alignment = offset % (1 << ElementSizeLog2Of(type));
-  MachineType mach_type = wasm::WasmOpcodes::MachineTypeFor(type);
-  if (alignment == 0 || jsgraph()->machine()->UnalignedLoadSupported(type)) {
-    return jsgraph()->machine()->Load(mach_type);
-  }
-  return jsgraph()->machine()->UnalignedLoad(mach_type);
-}
-
 const Operator* WasmGraphBuilder::GetSafeStoreOperator(int offset,
                                                        wasm::ValueType type) {
   int alignment = offset % (1 << ElementSizeLog2Of(type));
-  if (alignment == 0 || jsgraph()->machine()->UnalignedStoreSupported(type)) {
+  if (alignment == 0 || jsgraph()->machine()->UnalignedStoreSupported(
+                            MachineType::TypeForRepresentation(type), 0)) {
     StoreRepresentation rep(type, WriteBarrierKind::kNoWriteBarrier);
     return jsgraph()->machine()->Store(rep);
   }
@@ -3215,12 +3210,8 @@ Node* WasmGraphBuilder::LoadMem(wasm::ValueType type, MachineType memtype,
     BoundsCheckMem(memtype, index, offset, position);
   }
 
-  if (jsgraph()->machine()->Is64()) {
-    index =
-        graph()->NewNode(jsgraph()->machine()->ChangeUint32ToUint64(), index);
-  }
   if (memtype.representation() == MachineRepresentation::kWord8 ||
-      jsgraph()->machine()->UnalignedLoadSupported(memtype.representation())) {
+      jsgraph()->machine()->UnalignedLoadSupported(memtype, alignment)) {
     if (FLAG_wasm_trap_handler && V8_TRAP_HANDLER_SUPPORTED) {
       DCHECK(FLAG_wasm_guard_pages);
       Node* position_node = jsgraph()->Int32Constant(position);
@@ -3271,16 +3262,12 @@ Node* WasmGraphBuilder::StoreMem(MachineType memtype, Node* index,
     BoundsCheckMem(memtype, index, offset, position);
   }
 
-  if (jsgraph()->machine()->Is64()) {
-    index =
-        graph()->NewNode(jsgraph()->machine()->ChangeUint32ToUint64(), index);
-  }
 #if defined(V8_TARGET_BIG_ENDIAN)
   val = BuildChangeEndiannessStore(val, memtype, type);
 #endif
 
   if (memtype.representation() == MachineRepresentation::kWord8 ||
-      jsgraph()->machine()->UnalignedStoreSupported(memtype.representation())) {
+      jsgraph()->machine()->UnalignedStoreSupported(memtype, alignment)) {
     if (FLAG_wasm_trap_handler && V8_TRAP_HANDLER_SUPPORTED) {
       Node* position_node = jsgraph()->Int32Constant(position);
       store = graph()->NewNode(
@@ -3309,10 +3296,6 @@ Node* WasmGraphBuilder::StoreMem(MachineType memtype, Node* index,
 Node* WasmGraphBuilder::BuildAsmjsLoadMem(MachineType type, Node* index) {
   // TODO(turbofan): fold bounds checks for constant asm.js loads.
   // asm.js semantics use CheckedLoad (i.e. OOB reads return 0ish).
-  if (jsgraph()->machine()->Is64()) {
-    index =
-        graph()->NewNode(jsgraph()->machine()->ChangeUint32ToUint64(), index);
-  }
   const Operator* op = jsgraph()->machine()->CheckedLoad(type);
   Node* load =
       graph()->NewNode(op, MemBuffer(0), index, MemSize(), *effect_, *control_);
@@ -3324,10 +3307,6 @@ Node* WasmGraphBuilder::BuildAsmjsStoreMem(MachineType type, Node* index,
                                            Node* val) {
   // TODO(turbofan): fold bounds checks for constant asm.js stores.
   // asm.js semantics use CheckedStore (i.e. ignore OOB writes).
-  if (jsgraph()->machine()->Is64()) {
-    index =
-        graph()->NewNode(jsgraph()->machine()->ChangeUint32ToUint64(), index);
-  }
   const Operator* op =
       jsgraph()->machine()->CheckedStore(type.representation());
   Node* store = graph()->NewNode(op, MemBuffer(0), index, MemSize(), val,
@@ -3347,11 +3326,12 @@ Node* WasmGraphBuilder::String(const char* string) {
 
 Graph* WasmGraphBuilder::graph() { return jsgraph()->graph(); }
 
-void WasmGraphBuilder::LowerInt64() {
-  if (!jsgraph()->machine()->Is32()) return;
-  Int64Lowering r(jsgraph()->graph(), jsgraph()->machine(), jsgraph()->common(),
-                  jsgraph()->zone(), sig_);
-  r.LowerGraph();
+void WasmGraphBuilder::Int64LoweringForTesting() {
+  if (jsgraph()->machine()->Is32()) {
+    Int64Lowering r(jsgraph()->graph(), jsgraph()->machine(),
+                    jsgraph()->common(), jsgraph()->zone(), sig_);
+    r.LowerGraph();
+  }
 }
 
 void WasmGraphBuilder::SimdScalarLoweringForTesting() {
@@ -3768,63 +3748,6 @@ Node* WasmGraphBuilder::Simd8x16ShuffleOp(const uint8_t shuffle[16],
                           inputs[0], inputs[1]);
 }
 
-#define ATOMIC_BINOP_LIST(V)              \
-  V(I32AtomicAdd, Add, Uint32)            \
-  V(I32AtomicSub, Sub, Uint32)            \
-  V(I32AtomicAnd, And, Uint32)            \
-  V(I32AtomicOr, Or, Uint32)              \
-  V(I32AtomicXor, Xor, Uint32)            \
-  V(I32AtomicExchange, Exchange, Uint32)  \
-  V(I32AtomicAdd8U, Add, Uint8)           \
-  V(I32AtomicSub8U, Sub, Uint8)           \
-  V(I32AtomicAnd8U, And, Uint8)           \
-  V(I32AtomicOr8U, Or, Uint8)             \
-  V(I32AtomicXor8U, Xor, Uint8)           \
-  V(I32AtomicExchange8U, Exchange, Uint8) \
-  V(I32AtomicAdd16U, Add, Uint16)         \
-  V(I32AtomicSub16U, Sub, Uint16)         \
-  V(I32AtomicAnd16U, And, Uint16)         \
-  V(I32AtomicOr16U, Or, Uint16)           \
-  V(I32AtomicXor16U, Xor, Uint16)         \
-  V(I32AtomicExchange16U, Exchange, Uint16)
-
-#define ATOMIC_TERNARY_LIST(V)                          \
-  V(I32AtomicCompareExchange, CompareExchange, Uint32)  \
-  V(I32AtomicCompareExchange8U, CompareExchange, Uint8) \
-  V(I32AtomicCompareExchange16U, CompareExchange, Uint16)
-
-Node* WasmGraphBuilder::AtomicOp(wasm::WasmOpcode opcode, Node* const* inputs,
-                                 wasm::WasmCodePosition position) {
-  Node* node;
-  switch (opcode) {
-#define BUILD_ATOMIC_BINOP(Name, Operation, Type)                     \
-  case wasm::kExpr##Name: {                                           \
-    BoundsCheckMem(MachineType::Type(), inputs[0], 0, position);      \
-    node = graph()->NewNode(                                          \
-        jsgraph()->machine()->Atomic##Operation(MachineType::Type()), \
-        MemBuffer(0), inputs[0], inputs[1], *effect_, *control_);     \
-    break;                                                            \
-  }
-    ATOMIC_BINOP_LIST(BUILD_ATOMIC_BINOP)
-#undef BUILD_ATOMIC_BINOP
-
-#define BUILD_ATOMIC_TERNARY_OP(Name, Operation, Type)                       \
-  case wasm::kExpr##Name: {                                                  \
-    BoundsCheckMem(MachineType::Type(), inputs[0], 0, position);             \
-    node = graph()->NewNode(                                                 \
-        jsgraph()->machine()->Atomic##Operation(MachineType::Type()),        \
-        MemBuffer(0), inputs[0], inputs[1], inputs[2], *effect_, *control_); \
-    break;                                                                   \
-  }
-    ATOMIC_TERNARY_LIST(BUILD_ATOMIC_TERNARY_OP)
-#undef BUILD_ATOMIC_TERNARY_OP
-    default:
-      FATAL_UNSUPPORTED_OPCODE(opcode);
-  }
-  *effect_ = node;
-  return node;
-}
-
 static void RecordFunctionCompilation(CodeEventListener::LogEventsAndTags tag,
                                       Isolate* isolate, Handle<Code> code,
                                       const char* message, uint32_t index,
@@ -3846,7 +3769,8 @@ static void RecordFunctionCompilation(CodeEventListener::LogEventsAndTags tag,
                                    *script_str, 0, 0));
 }
 
-Handle<Code> CompileJSToWasmWrapper(Isolate* isolate, wasm::WasmModule* module,
+Handle<Code> CompileJSToWasmWrapper(Isolate* isolate,
+                                    const wasm::WasmModule* module,
                                     Handle<Code> wasm_code, uint32_t index) {
   const wasm::WasmFunction* func = &module->functions[index];
 
@@ -3862,22 +3786,12 @@ Handle<Code> CompileJSToWasmWrapper(Isolate* isolate, wasm::WasmModule* module,
   Node* control = nullptr;
   Node* effect = nullptr;
 
-  // TODO(titzer): compile JS to WASM wrappers without a {ModuleEnv}.
-  ModuleEnv env = {module,
-                   std::vector<Address>(),              // function_tables
-                   std::vector<Address>(),              // signature_tables
-                   std::vector<wasm::SignatureMap*>(),  // signature_maps
-                   std::vector<Handle<Code>>(),         // function_code
-                   BUILTIN_CODE(isolate, Illegal),      // default_function_code
-                   0,
-                   0,
-                   0};
-
-  WasmGraphBuilder builder(&env, &zone, &jsgraph,
+  wasm::ModuleEnv module_env(module, nullptr);
+  WasmGraphBuilder builder(&module_env, &zone, &jsgraph,
                            CEntryStub(isolate, 1).GetCode(), func->sig);
   builder.set_control_ptr(&control);
   builder.set_effect_ptr(&effect);
-  builder.BuildJSToWasmWrapper(wasm_code);
+  builder.BuildJSToWasmWrapper(wasm_code, func->sig);
 
   //----------------------------------------------------------------------------
   // Run the compilation pipeline.
@@ -3889,8 +3803,8 @@ Handle<Code> CompileJSToWasmWrapper(Isolate* isolate, wasm::WasmModule* module,
   }
 
   // Schedule and compile to machine code.
-  int params =
-      static_cast<int>(module->functions[index].sig->parameter_count());
+  int params = static_cast<int>(
+      module_env.GetFunctionSignature(index)->parameter_count());
   CallDescriptor* incoming = Linkage::GetJSCallDescriptor(
       &zone, false, params + 1, CallDescriptor::kNoFlags);
   Code::Flags flags = Code::ComputeFlags(Code::JS_TO_WASM_FUNCTION);
@@ -3958,7 +3872,7 @@ Handle<Code> CompileWasmToJSWrapper(Isolate* isolate, Handle<JSReceiver> target,
                            source_position_table);
   builder.set_control_ptr(&control);
   builder.set_effect_ptr(&effect);
-  builder.BuildWasmToJSWrapper(target);
+  builder.BuildWasmToJSWrapper(target, sig);
 
   Handle<Code> code = Handle<Code>::null();
   {
@@ -4042,7 +3956,7 @@ Handle<Code> CompileWasmInterpreterEntry(Isolate* isolate, uint32_t func_index,
                            CEntryStub(isolate, 1).GetCode(), sig);
   builder.set_control_ptr(&control);
   builder.set_effect_ptr(&effect);
-  builder.BuildWasmInterpreterEntry(func_index, instance);
+  builder.BuildWasmInterpreterEntry(func_index, sig, instance);
 
   Handle<Code> code = Handle<Code>::null();
   {
@@ -4089,84 +4003,21 @@ Handle<Code> CompileWasmInterpreterEntry(Isolate* isolate, uint32_t func_index,
   return code;
 }
 
-Handle<Code> CompileCWasmEntry(Isolate* isolate, wasm::FunctionSig* sig) {
-  Zone zone(isolate->allocator(), ZONE_NAME);
-  Graph graph(&zone);
-  CommonOperatorBuilder common(&zone);
-  MachineOperatorBuilder machine(&zone);
-  JSGraph jsgraph(isolate, &graph, &common, nullptr, nullptr, &machine);
-
-  Node* control = nullptr;
-  Node* effect = nullptr;
-
-  WasmGraphBuilder builder(nullptr, &zone, &jsgraph,
-                           CEntryStub(isolate, 1).GetCode(), sig);
-  builder.set_control_ptr(&control);
-  builder.set_effect_ptr(&effect);
-  builder.BuildCWasmEntry();
-
-  if (FLAG_trace_turbo_graph) {  // Simple textual RPO.
-    OFStream os(stdout);
-    os << "-- C Wasm entry graph -- " << std::endl;
-    os << AsRPO(graph);
-  }
-
-  // Schedule and compile to machine code.
-  CallDescriptor* incoming = Linkage::GetJSCallDescriptor(
-      &zone, false, CWasmEntryParameters::kNumParameters + 1,
-      CallDescriptor::kNoFlags);
-  Code::Flags flags = Code::ComputeFlags(Code::C_WASM_ENTRY);
-
-  // Build a name in the form "c-wasm-entry:<params>:<returns>".
-  static constexpr size_t kMaxNameLen = 128;
-  char debug_name[kMaxNameLen] = "c-wasm-entry:";
-  size_t name_len = strlen(debug_name);
-  auto append_name_char = [&](char c) {
-    if (name_len + 1 < kMaxNameLen) debug_name[name_len++] = c;
-  };
-  for (wasm::ValueType t : sig->parameters()) {
-    append_name_char(wasm::WasmOpcodes::ShortNameOf(t));
-  }
-  append_name_char(':');
-  for (wasm::ValueType t : sig->returns()) {
-    append_name_char(wasm::WasmOpcodes::ShortNameOf(t));
-  }
-  debug_name[name_len] = '\0';
-  Vector<const char> debug_name_vec(debug_name, name_len);
-
-  CompilationInfo info(debug_name_vec, isolate, &zone, flags);
-  Handle<Code> code = Pipeline::GenerateCodeForTesting(&info, incoming, &graph);
-#ifdef ENABLE_DISASSEMBLER
-  if (FLAG_print_opt_code && !code.is_null()) {
-    OFStream os(stdout);
-    code->Disassemble(debug_name, os);
-  }
-#endif
-
-  return code;
-}
-
 SourcePositionTable* WasmCompilationUnit::BuildGraphForWasmFunction(
     double* decode_ms) {
-#if DEBUG
-  if (env_) {
-    size_t tables_size = env_->module->function_tables.size();
-    DCHECK_EQ(tables_size, env_->function_tables.size());
-    DCHECK_EQ(tables_size, env_->signature_tables.size());
-    DCHECK_EQ(tables_size, env_->signature_maps.size());
-  }
-#endif
-
   base::ElapsedTimer decode_timer;
   if (FLAG_trace_wasm_decode_time) {
     decode_timer.Start();
   }
   // Create a TF graph during decoding.
 
+  Graph* graph = jsgraph_->graph();
+  CommonOperatorBuilder* common = jsgraph_->common();
+  MachineOperatorBuilder* machine = jsgraph_->machine();
   SourcePositionTable* source_position_table =
-      new (jsgraph_->zone()) SourcePositionTable(jsgraph_->graph());
-  WasmGraphBuilder builder(env_, jsgraph_->zone(), jsgraph_, centry_stub_,
-                           func_body_.sig, source_position_table);
+      new (jsgraph_->zone()) SourcePositionTable(graph);
+  WasmGraphBuilder builder(module_env_, jsgraph_->zone(), jsgraph_,
+                           centry_stub_, func_body_.sig, source_position_table);
   graph_construction_result_ =
       wasm::BuildTFGraph(isolate_->allocator(), &builder, func_body_);
 
@@ -4179,7 +4030,10 @@ SourcePositionTable* WasmCompilationUnit::BuildGraphForWasmFunction(
     return nullptr;
   }
 
-  builder.LowerInt64();
+  if (machine->Is32()) {
+    Int64Lowering(graph, machine, common, jsgraph_->zone(), func_body_.sig)
+        .LowerGraph();
+  }
 
   if (builder.has_simd() && !CpuFeatures::SupportsWasmSimd128()) {
     SimdScalarLowering(jsgraph_, func_body_.sig).LowerGraph();
@@ -4187,7 +4041,7 @@ SourcePositionTable* WasmCompilationUnit::BuildGraphForWasmFunction(
 
   if (func_index_ >= FLAG_trace_wasm_ast_start &&
       func_index_ < FLAG_trace_wasm_ast_end) {
-    PrintRawWasmCode(isolate_->allocator(), func_body_, env_->module);
+    PrintRawWasmCode(isolate_->allocator(), func_body_, module_env_->module);
   }
   if (FLAG_trace_wasm_decode_time) {
     *decode_ms = decode_timer.Elapsed().InMillisecondsF();
@@ -4215,23 +4069,26 @@ Vector<const char> GetDebugName(Zone* zone, wasm::WasmName name, int index) {
 }
 }  // namespace
 
-WasmCompilationUnit::WasmCompilationUnit(
-    Isolate* isolate, const wasm::ModuleWireBytes& wire_bytes, ModuleEnv* env,
-    const wasm::WasmFunction* function, Handle<Code> centry_stub)
+WasmCompilationUnit::WasmCompilationUnit(Isolate* isolate,
+                                         wasm::ModuleBytesEnv* module_env,
+                                         const wasm::WasmFunction* function,
+                                         Handle<Code> centry_stub)
     : WasmCompilationUnit(
-          isolate, env,
-          wasm::FunctionBody{function->sig, function->code.offset(),
-                             wire_bytes.start() + function->code.offset(),
-                             wire_bytes.start() + function->code.end_offset()},
-          wire_bytes.GetNameOrNull(function), function->func_index,
+          isolate, &module_env->module_env,
+          wasm::FunctionBody{
+              function->sig, function->code.offset(),
+              module_env->wire_bytes.start() + function->code.offset(),
+              module_env->wire_bytes.start() + function->code.end_offset()},
+          module_env->wire_bytes.GetNameOrNull(function), function->func_index,
           centry_stub) {}
 
-WasmCompilationUnit::WasmCompilationUnit(Isolate* isolate, ModuleEnv* env,
+WasmCompilationUnit::WasmCompilationUnit(Isolate* isolate,
+                                         wasm::ModuleEnv* module_env,
                                          wasm::FunctionBody body,
                                          wasm::WasmName name, int index,
                                          Handle<Code> centry_stub)
     : isolate_(isolate),
-      env_(env),
+      module_env_(module_env),
       func_body_(body),
       func_name_(name),
       counters_(isolate->counters()),
@@ -4239,23 +4096,24 @@ WasmCompilationUnit::WasmCompilationUnit(Isolate* isolate, ModuleEnv* env,
       func_index_(index) {}
 
 WasmCompilationUnit::WasmCompilationUnit(
-    Isolate* isolate, const wasm::ModuleWireBytes& wire_bytes, ModuleEnv* env,
+    Isolate* isolate, wasm::ModuleBytesEnv* module_env,
     const wasm::WasmFunction* function, Handle<Code> centry_stub,
     const std::shared_ptr<Counters>& async_counters)
     : WasmCompilationUnit(
-          isolate, env,
-          wasm::FunctionBody{function->sig, function->code.offset(),
-                             wire_bytes.start() + function->code.offset(),
-                             wire_bytes.start() + function->code.end_offset()},
-          wire_bytes.GetNameOrNull(function), function->func_index, centry_stub,
-          async_counters) {}
+          isolate, &module_env->module_env,
+          wasm::FunctionBody{
+              function->sig, function->code.offset(),
+              module_env->wire_bytes.start() + function->code.offset(),
+              module_env->wire_bytes.start() + function->code.end_offset()},
+          module_env->wire_bytes.GetNameOrNull(function), function->func_index,
+          centry_stub, async_counters) {}
 
 WasmCompilationUnit::WasmCompilationUnit(
-    Isolate* isolate, ModuleEnv* env, wasm::FunctionBody body,
+    Isolate* isolate, wasm::ModuleEnv* module_env, wasm::FunctionBody body,
     wasm::WasmName name, int index, Handle<Code> centry_stub,
     const std::shared_ptr<Counters>& async_counters)
     : isolate_(isolate),
-      env_(env),
+      module_env_(module_env),
       func_body_(body),
       func_name_(name),
       counters_(async_counters.get()),
@@ -4263,10 +4121,8 @@ WasmCompilationUnit::WasmCompilationUnit(
       func_index_(index) {}
 
 void WasmCompilationUnit::ExecuteCompilation() {
-  auto timed_histogram = env_->module->is_wasm()
-                             ? counters()->wasm_compile_wasm_function_time()
-                             : counters()->wasm_compile_asm_function_time();
-  TimedHistogramScope wasm_compile_function_time_scope(timed_histogram);
+  TimedHistogramScope wasm_compile_function_time_scope(
+      counters()->wasm_compile_function_time());
 
   if (FLAG_trace_wasm_compiler) {
     if (func_name_.start() != nullptr) {
@@ -4322,7 +4178,7 @@ void WasmCompilationUnit::ExecuteCompilation() {
 
     job_.reset(Pipeline::NewWasmCompilationJob(
         info_.get(), jsgraph_, descriptor, source_positions,
-        &protected_instructions, env_->module->origin()));
+        &protected_instructions, module_env_->module->origin()));
     ok_ = job_->ExecuteJob() == CompilationJob::SUCCEEDED;
     // TODO(bradnelson): Improve histogram handling of size_t.
     counters()->wasm_compile_function_peak_memory_bytes()->AddSample(
@@ -4393,9 +4249,8 @@ MaybeHandle<Code> WasmCompilationUnit::FinishCompilation(
 // static
 MaybeHandle<Code> WasmCompilationUnit::CompileWasmFunction(
     wasm::ErrorThrower* thrower, Isolate* isolate,
-    const wasm::ModuleWireBytes& wire_bytes, ModuleEnv* env,
-    const wasm::WasmFunction* function) {
-  WasmCompilationUnit unit(isolate, wire_bytes, env, function,
+    wasm::ModuleBytesEnv* module_env, const wasm::WasmFunction* function) {
+  WasmCompilationUnit unit(isolate, module_env, function,
                            CEntryStub(isolate, 1).GetCode());
   unit.ExecuteCompilation();
   return unit.FinishCompilation(thrower);

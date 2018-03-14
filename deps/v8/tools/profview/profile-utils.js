@@ -6,8 +6,6 @@
 
 let codeKinds = [
     "UNKNOWN",
-    "CPPPARSE",
-    "CPPCOMPBC",
     "CPPCOMP",
     "CPPGC",
     "CPPEXT",
@@ -66,12 +64,8 @@ function resolveCodeKindAndVmState(code, vmState) {
     if (vmState === 1) {
       kind = "CPPGC";
     } else if (vmState === 2) {
-      kind = "CPPPARSE";
-    } else if (vmState === 3) {
-      kind = "CPPCOMPBC";
-    } else if (vmState === 4) {
       kind = "CPPCOMP";
-    } else if (vmState === 6) {
+    } else if (vmState === 4) {
       kind = "CPPEXT";
     }
   }
@@ -91,10 +85,10 @@ function codeEquals(code1, code2, allowDifferentKinds = false) {
   return true;
 }
 
-function createNodeFromStackEntry(code, codeId, vmState) {
+function createNodeFromStackEntry(code, codeId) {
   let name = code ? code.name : "UNKNOWN";
 
-  return { name, codeId, type : resolveCodeKindAndVmState(code, vmState),
+  return { name, codeId, type : resolveCodeKind(code),
            children : [], ownTicks : 0, ticks : 0 };
 }
 
@@ -149,7 +143,6 @@ function findNextFrame(file, stack, stackPos, step, filter) {
 
 function addOrUpdateChildNode(parent, file, stackIndex, stackPos, ascending) {
   let stack = file.ticks[stackIndex].s;
-  let vmState = file.ticks[stackIndex].vm;
   let codeId = stack[stackPos];
   let code = codeId >= 0 ? file.code[codeId] : undefined;
   if (stackPos === -1) {
@@ -164,7 +157,7 @@ function addOrUpdateChildNode(parent, file, stackIndex, stackPos, ascending) {
     let childId = childIdFromCode(codeId, code);
     let child = parent.children[childId];
     if (!child) {
-      child = createNodeFromStackEntry(code, codeId, vmState);
+      child = createNodeFromStackEntry(code, codeId);
       child.delayedExpansion = { frameList : [], ascending };
       parent.children[childId] = child;
     }
@@ -268,8 +261,6 @@ function buildCategoryTreeAndLookup() {
   addCategory("Other generated", [ "STUB", "BUILTIN" ]);
   addCategory("C++", [ "CPP", "LIB" ]);
   addCategory("C++/GC", [ "CPPGC" ]);
-  addCategory("C++/Parser", [ "CPPPARSE" ]);
-  addCategory("C++/Bytecode compiler", [ "CPPCOMPBC" ]);
   addCategory("C++/Compiler", [ "CPPCOMP" ]);
   addCategory("C++/External", [ "CPPEXT" ]);
   addCategory("Unknown", [ "UNKNOWN" ]);
@@ -354,7 +345,7 @@ class FunctionListTree {
       }
       child = tree.children[childId];
       if (!child) {
-        child = createNodeFromStackEntry(code, codeId, vmState);
+        child = createNodeFromStackEntry(code, codeId);
         child.children[0] = createEmptyNode("Top-down tree");
         child.children[0].delayedExpansion =
           { frameList : [], ascending : false };

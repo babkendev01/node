@@ -33,13 +33,12 @@
 #include "src/debug/debug.h"
 #include "src/disasm.h"
 #include "src/disassembler.h"
-#include "src/frames-inl.h"
 #include "src/macro-assembler.h"
 #include "src/objects-inl.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 #define __ assm.
 
@@ -285,7 +284,7 @@ TEST(DisasmX64) {
   // TODO(mstarzinger): The following is protected.
   // __ call(Operand(rbx, rcx, times_4, 10000));
   __ nop();
-  Handle<Code> ic = BUILTIN_CODE(isolate, LoadIC);
+  Handle<Code> ic = isolate->builtins()->LoadIC();
   __ call(ic, RelocInfo::CODE_TARGET);
   __ nop();
   __ nop();
@@ -959,6 +958,3 @@ TEST(DisasmX64) {
 }
 
 #undef __
-
-}  // namespace internal
-}  // namespace v8

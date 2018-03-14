@@ -829,11 +829,9 @@ const Operator* RepresentationChanger::Int32OperatorFor(
     IrOpcode::Value opcode) {
   switch (opcode) {
     case IrOpcode::kSpeculativeNumberAdd:  // Fall through.
-    case IrOpcode::kSpeculativeSafeIntegerAdd:
     case IrOpcode::kNumberAdd:
       return machine()->Int32Add();
     case IrOpcode::kSpeculativeNumberSubtract:  // Fall through.
-    case IrOpcode::kSpeculativeSafeIntegerSubtract:
     case IrOpcode::kNumberSubtract:
       return machine()->Int32Sub();
     case IrOpcode::kSpeculativeNumberMultiply:
@@ -871,9 +869,9 @@ const Operator* RepresentationChanger::Int32OperatorFor(
 const Operator* RepresentationChanger::Int32OverflowOperatorFor(
     IrOpcode::Value opcode) {
   switch (opcode) {
-    case IrOpcode::kSpeculativeSafeIntegerAdd:
+    case IrOpcode::kSpeculativeNumberAdd:
       return simplified()->CheckedInt32Add();
-    case IrOpcode::kSpeculativeSafeIntegerSubtract:
+    case IrOpcode::kSpeculativeNumberSubtract:
       return simplified()->CheckedInt32Sub();
     case IrOpcode::kSpeculativeNumberDivide:
       return simplified()->CheckedInt32Div();
@@ -951,11 +949,9 @@ const Operator* RepresentationChanger::Float64OperatorFor(
     IrOpcode::Value opcode) {
   switch (opcode) {
     case IrOpcode::kSpeculativeNumberAdd:
-    case IrOpcode::kSpeculativeSafeIntegerAdd:
     case IrOpcode::kNumberAdd:
       return machine()->Float64Add();
     case IrOpcode::kSpeculativeNumberSubtract:
-    case IrOpcode::kSpeculativeSafeIntegerSubtract:
     case IrOpcode::kNumberSubtract:
       return machine()->Float64Sub();
     case IrOpcode::kSpeculativeNumberMultiply:

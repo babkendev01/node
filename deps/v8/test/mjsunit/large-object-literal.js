@@ -78,7 +78,7 @@ for (var i = 0; i < sizes.length; i++) {
 }
 
 
-// Large Object dictionary mode literal.
+// Larg Object dictionary mode literal.
 
 
 function TestSlowLiteralOptimized() {

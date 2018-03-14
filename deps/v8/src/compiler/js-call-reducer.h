@@ -24,7 +24,6 @@ class CommonOperatorBuilder;
 class JSGraph;
 class JSOperatorBuilder;
 class SimplifiedOperatorBuilder;
-class VectorSlotPair;
 
 // Performs strength reduction on {JSConstruct} and {JSCall} nodes,
 // which might allow inlining or other optimizations to be performed afterwards.
@@ -63,7 +62,6 @@ class JSCallReducer final : public AdvancedReducer {
   Reduction ReduceObjectGetPrototype(Node* node, Node* object);
   Reduction ReduceObjectGetPrototypeOf(Node* node);
   Reduction ReduceObjectPrototypeGetProto(Node* node);
-  Reduction ReduceObjectPrototypeHasOwnProperty(Node* node);
   Reduction ReduceObjectPrototypeIsPrototypeOf(Node* node);
   Reduction ReduceReflectApply(Node* node);
   Reduction ReduceReflectConstruct(Node* node);
@@ -71,8 +69,7 @@ class JSCallReducer final : public AdvancedReducer {
   Reduction ReduceArrayForEach(Handle<JSFunction> function, Node* node);
   Reduction ReduceArrayMap(Handle<JSFunction> function, Node* node);
   Reduction ReduceCallOrConstructWithArrayLikeOrSpread(
-      Node* node, int arity, CallFrequency const& frequency,
-      VectorSlotPair const& feedback);
+      Node* node, int arity, CallFrequency const& frequency);
   Reduction ReduceJSConstruct(Node* node);
   Reduction ReduceJSConstructWithArrayLike(Node* node);
   Reduction ReduceJSConstructWithSpread(Node* node);

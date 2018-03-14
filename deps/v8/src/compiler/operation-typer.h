@@ -51,7 +51,6 @@ class V8_EXPORT_PRIVATE OperationTyper {
   // Check operators.
   Type* CheckFloat64Hole(Type* type);
   Type* CheckNumber(Type* type);
-  Type* ConvertTaggedHoleToUndefined(Type* type);
 
   Type* TypeTypeGuard(const Operator* sigma_op, Type* input);
 

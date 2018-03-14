@@ -37,7 +37,8 @@ class JSIntrinsicLoweringTest : public GraphTest {
                     &machine);
     // TODO(titzer): mock the GraphReducer here for better unit testing.
     GraphReducer graph_reducer(zone(), graph());
-    JSIntrinsicLowering reducer(&graph_reducer, &jsgraph);
+    JSIntrinsicLowering reducer(&graph_reducer, &jsgraph,
+                                JSIntrinsicLowering::kDeoptimizationEnabled);
     return reducer.Reduce(node);
   }
 

@@ -27,20 +27,10 @@ function bar() {
 //# sourceURL=test2.js`, 23, 25);
 
 (async function test() {
-  InspectorTest.log('Connecting session 1');
   var session1 = contextGroup.connect();
   await session1.Protocol.Debugger.enable();
-  InspectorTest.log('Pausing in 1');
-  session1.Protocol.Runtime.evaluate({expression: 'debugger;'});
-  await waitForPaused(session1, 1);
-  InspectorTest.log('Connecting session 2');
   var session2 = contextGroup.connect();
-  var enabledPromise = session2.Protocol.Debugger.enable();
-  await waitForPaused(session2, 2);
-  await enabledPromise;
-  InspectorTest.log('Resuming in 2');
-  session2.Protocol.Debugger.resume();
-  await waitForBothResumed();
+  await session2.Protocol.Debugger.enable();
 
   InspectorTest.log('Setting breakpoints in 1');
   await session1.Protocol.Debugger.setBreakpointByUrl({url: 'test.js', lineNumber: 11});
@@ -171,16 +161,6 @@ function bar() {
   await session2.Protocol.Debugger.setBreakpointsActive({active: false});
   InspectorTest.log('Evaluating common breakpoint in 1');
   await session1.Protocol.Runtime.evaluate({expression: 'foo();'});
-
-  InspectorTest.log('Activating breakpoints in 1');
-  await session1.Protocol.Debugger.setBreakpointsActive({active: true});
-  InspectorTest.log('Activating breakpoints in 2');
-  await session2.Protocol.Debugger.setBreakpointsActive({active: true});
-  InspectorTest.log('Disabling debugger agent in 1');
-  await session1.Protocol.Debugger.disable();
-  InspectorTest.log('Evaluating breakpoint in 1 (should not be triggered)');
-  session2.Protocol.Runtime.evaluate({expression: 'baz();\ndebugger;'});
-  await waitForPaused(session2, 2);
 
   InspectorTest.completeTest();
 

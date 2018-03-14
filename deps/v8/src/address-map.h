@@ -84,11 +84,6 @@ class SerializerReference {
                                ValueIndexBits::encode(index));
   }
 
-  static SerializerReference OffHeapBackingStoreReference(uint32_t index) {
-    return SerializerReference(SpaceBits::encode(kExternalSpace) |
-                               ValueIndexBits::encode(index));
-  }
-
   static SerializerReference LargeObjectReference(uint32_t index) {
     return SerializerReference(SpaceBits::encode(LO_SPACE) |
                                ValueIndexBits::encode(index));
@@ -121,15 +116,6 @@ class SerializerReference {
 
   uint32_t map_index() const {
     DCHECK(is_back_reference());
-    return ValueIndexBits::decode(bitfield_);
-  }
-
-  bool is_off_heap_backing_store_reference() const {
-    return SpaceBits::decode(bitfield_) == kExternalSpace;
-  }
-
-  uint32_t off_heap_backing_store_index() const {
-    DCHECK(is_off_heap_backing_store_reference());
     return ValueIndexBits::decode(bitfield_);
   }
 
@@ -174,8 +160,6 @@ class SerializerReference {
   //   [ kSpecialValueSpace      ] [ Special value index          ]
   // Attached reference
   //   [ kAttachedReferenceSpace ] [ Attached reference index     ]
-  // External
-  //   [ kExternalSpace          ] [ External reference index     ]
 
   static const int kChunkOffsetSize = kPageSizeBits - kObjectAlignmentBits;
   static const int kChunkIndexSize = 32 - kChunkOffsetSize - kSpaceTagSize;
@@ -183,8 +167,7 @@ class SerializerReference {
 
   static const int kSpecialValueSpace = LAST_SPACE + 1;
   static const int kAttachedReferenceSpace = kSpecialValueSpace + 1;
-  static const int kExternalSpace = kAttachedReferenceSpace + 1;
-  STATIC_ASSERT(kExternalSpace < (1 << kSpaceTagSize));
+  STATIC_ASSERT(kAttachedReferenceSpace < (1 << kSpaceTagSize));
 
   static const int kInvalidValue = 0;
   static const int kDummyValue = 1;
@@ -210,13 +193,13 @@ class SerializerReferenceMap {
   SerializerReferenceMap()
       : no_allocation_(), map_(), attached_reference_index_(0) {}
 
-  SerializerReference Lookup(void* obj) {
+  SerializerReference Lookup(HeapObject* obj) {
     Maybe<uint32_t> maybe_index = map_.Get(obj);
     return maybe_index.IsJust() ? SerializerReference(maybe_index.FromJust())
                                 : SerializerReference();
   }
 
-  void Add(void* obj, SerializerReference b) {
+  void Add(HeapObject* obj, SerializerReference b) {
     DCHECK(b.is_valid());
     DCHECK(map_.Get(obj).IsNothing());
     map_.Set(obj, b.bitfield_);
@@ -231,7 +214,7 @@ class SerializerReferenceMap {
 
  private:
   DisallowHeapAllocation no_allocation_;
-  PointerToIndexHashMap<void*> map_;
+  HeapObjectToIndexHashMap map_;
   int attached_reference_index_;
   DISALLOW_COPY_AND_ASSIGN(SerializerReferenceMap);
 };

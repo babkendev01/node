@@ -11,8 +11,7 @@
 #include "src/v8.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
 
 static void CheckObject(Isolate* isolate, Handle<Object> obj,
                         const char* string) {
@@ -72,6 +71,3 @@ TEST(NoSideEffectsToString) {
   CheckObject(isolate, factory->NewJSObject(isolate->object_function()),
               "#<Object>");
 }
-
-}  // namespace internal
-}  // namespace v8

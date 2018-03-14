@@ -5,14 +5,34 @@
 #ifndef V8_FRAMES_INL_H_
 #define V8_FRAMES_INL_H_
 
-#include "src/frame-constants.h"
 #include "src/frames.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
 #include "src/v8memory.h"
 
+#if V8_TARGET_ARCH_IA32
+#include "src/ia32/frames-ia32.h"  // NOLINT
+#elif V8_TARGET_ARCH_X64
+#include "src/x64/frames-x64.h"  // NOLINT
+#elif V8_TARGET_ARCH_ARM64
+#include "src/arm64/frames-arm64.h"  // NOLINT
+#elif V8_TARGET_ARCH_ARM
+#include "src/arm/frames-arm.h"  // NOLINT
+#elif V8_TARGET_ARCH_PPC
+#include "src/ppc/frames-ppc.h"  // NOLINT
+#elif V8_TARGET_ARCH_MIPS
+#include "src/mips/frames-mips.h"  // NOLINT
+#elif V8_TARGET_ARCH_MIPS64
+#include "src/mips64/frames-mips64.h"  // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/frames-s390.h"  // NOLINT
+#else
+#error Unsupported target architecture.
+#endif
+
 namespace v8 {
 namespace internal {
+
 
 inline Address StackHandler::address() const {
   return reinterpret_cast<Address>(const_cast<StackHandler*>(this));
@@ -40,6 +60,18 @@ inline StackHandler* StackFrame::top_handler() const {
 }
 
 
+inline Code* StackFrame::LookupCode() const {
+  // TODO(jgruber): This should really check that pc is within the returned
+  // code's instruction range [instruction_start(), instruction_end()[.
+  return GetContainingCode(isolate(), pc());
+}
+
+
+inline Code* StackFrame::GetContainingCode(Isolate* isolate, Address pc) {
+  return isolate->inner_pointer_to_code_cache()->GetCacheEntry(pc)->code;
+}
+
+
 inline Address* StackFrame::ResolveReturnAddressLocation(Address* pc_address) {
   if (return_address_location_resolver_ == NULL) {
     return pc_address;
@@ -55,9 +87,12 @@ inline EntryFrame::EntryFrame(StackFrameIteratorBase* iterator)
     : StackFrame(iterator) {
 }
 
-inline ConstructEntryFrame::ConstructEntryFrame(
+
+inline EntryConstructFrame::EntryConstructFrame(
     StackFrameIteratorBase* iterator)
-    : EntryFrame(iterator) {}
+    : EntryFrame(iterator) {
+}
+
 
 inline ExitFrame::ExitFrame(StackFrameIteratorBase* iterator)
     : StackFrame(iterator) {
@@ -228,9 +263,6 @@ inline WasmToJsFrame::WasmToJsFrame(StackFrameIteratorBase* iterator)
     : StubFrame(iterator) {}
 
 inline JsToWasmFrame::JsToWasmFrame(StackFrameIteratorBase* iterator)
-    : StubFrame(iterator) {}
-
-inline CWasmEntryFrame::CWasmEntryFrame(StackFrameIteratorBase* iterator)
     : StubFrame(iterator) {}
 
 inline InternalFrame::InternalFrame(StackFrameIteratorBase* iterator)

@@ -3,16 +3,9 @@
 // found in the LICENSE file.
 
 (function() {
-  function benchy(name, test, testSetup) {
-    new BenchmarkSuite(name, [10000], [
-      new Benchmark(name, false, false, 0, test, testSetup, TearDown)
-    ]);
-  }
-
-  benchy('Debugger.paused', DebuggerPaused, Setup);
-  benchy('Debugger.getPossibleBreakpoints',
-    DebuggerGetPossibleBreakpoints,
-    SetupGetPossibleBreakpoints);
+  new BenchmarkSuite('Debugger.paused', [10000], [
+    new Benchmark('Debugger.paused', false, false, 0, DebuggerPaused, Setup, TearDown),
+  ]);
 
   function Setup() {
     SendMessage('Debugger.enable');
@@ -28,33 +21,5 @@
     for (var i = 0; i < 10; ++i) {
       debugger;
     }
-  }
-
-  let scriptId;
-  function SetupGetPossibleBreakpoints() {
-    Setup();
-    let expression = '';
-    for (let i = 0; i < 20; ++i) {
-      expression += `function foo${i}(){
-  if (a) {
-    return true;
-  } else {
-    return false;
-  }
-}\n`;
-    }
-    listener = function(msg) {
-      if (msg.method === "Debugger.scriptParsed") {
-        scriptId = msg.params.scriptId;
-        listener = null;
-      }
-    }
-    SendMessage('Runtime.evaluate', {expression});
-  }
-
-  function DebuggerGetPossibleBreakpoints() {
-    SendMessage('Debugger.getPossibleBreakpoints', {
-      start: {lineNumber: 0, columnNumber: 0, scriptId: scriptId}
-    });
   }
 })();

@@ -179,15 +179,7 @@ uint32_t PositiveNumberToUint32(Object* number) {
 
 int64_t NumberToInt64(Object* number) {
   if (number->IsSmi()) return Smi::ToInt(number);
-  double d = number->Number();
-  if (std::isnan(d)) return 0;
-  if (d >= static_cast<double>(std::numeric_limits<int64_t>::max())) {
-    return std::numeric_limits<int64_t>::max();
-  }
-  if (d <= static_cast<double>(std::numeric_limits<int64_t>::min())) {
-    return std::numeric_limits<int64_t>::min();
-  }
-  return static_cast<int64_t>(d);
+  return static_cast<int64_t>(number->Number());
 }
 
 bool TryNumberToSize(Object* number, size_t* result) {
@@ -497,7 +489,7 @@ double InternalStringToInt(UnicodeCache* unicode_cache,
 
   // NOTE: The code for computing the value may seem a bit complex at
   // first glance. It is structured to use 32-bit multiply-and-add
-  // loops as long as possible to avoid losing precision.
+  // loops as long as possible to avoid loosing precision.
 
   double v = 0.0;
   bool done = false;

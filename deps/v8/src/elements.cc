@@ -7,7 +7,6 @@
 #include "src/arguments.h"
 #include "src/conversions.h"
 #include "src/factory.h"
-#include "src/frames.h"
 #include "src/isolate-inl.h"
 #include "src/messages.h"
 #include "src/objects-inl.h"
@@ -2266,7 +2265,7 @@ class FastElementsAccessor : public ElementsAccessorBase<Subclass, KindTraits> {
           }
           return Just(false);
         } else {
-          // Search for The Hole in HOLEY_DOUBLE_ELEMENTS
+          // Seach for The Hole in HOLEY_DOUBLE_ELEMENTS
           DCHECK_EQ(Subclass::kind(), HOLEY_DOUBLE_ELEMENTS);
           auto elements = FixedDoubleArray::cast(receiver->elements());
 

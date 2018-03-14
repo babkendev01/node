@@ -27,8 +27,7 @@ struct SourceRange {
   int32_t start, end;
 };
 
-// The list of ast node kinds that have associated source ranges. Note that this
-// macro is not undefined at the end of this file.
+// The list of ast node kinds that have associated source ranges.
 #define AST_SOURCE_RANGE_LIST(V) \
   V(Block)                       \
   V(CaseClause)                  \
@@ -36,7 +35,6 @@ struct SourceRange {
   V(IfStatement)                 \
   V(IterationStatement)          \
   V(JumpStatement)               \
-  V(Suspend)                     \
   V(SwitchStatement)             \
   V(Throw)                       \
   V(TryCatchStatement)           \
@@ -166,12 +164,6 @@ class JumpStatementSourceRanges final : public ContinuationSourceRanges {
       : ContinuationSourceRanges(continuation_position) {}
 };
 
-class SuspendSourceRanges final : public ContinuationSourceRanges {
- public:
-  explicit SuspendSourceRanges(int32_t continuation_position)
-      : ContinuationSourceRanges(continuation_position) {}
-};
-
 class SwitchStatementSourceRanges final : public ContinuationSourceRanges {
  public:
   explicit SwitchStatementSourceRanges(int32_t continuation_position)
@@ -190,14 +182,8 @@ class TryCatchStatementSourceRanges final : public AstNodeSourceRanges {
       : catch_range_(catch_range) {}
 
   SourceRange GetRange(SourceRangeKind kind) {
-    switch (kind) {
-      case SourceRangeKind::kCatch:
-        return catch_range_;
-      case SourceRangeKind::kContinuation:
-        return SourceRange::ContinuationOf(catch_range_);
-      default:
-        UNREACHABLE();
-    }
+    DCHECK(kind == SourceRangeKind::kCatch);
+    return catch_range_;
   }
 
  private:
@@ -210,14 +196,8 @@ class TryFinallyStatementSourceRanges final : public AstNodeSourceRanges {
       : finally_range_(finally_range) {}
 
   SourceRange GetRange(SourceRangeKind kind) {
-    switch (kind) {
-      case SourceRangeKind::kFinally:
-        return finally_range_;
-      case SourceRangeKind::kContinuation:
-        return SourceRange::ContinuationOf(finally_range_);
-      default:
-        UNREACHABLE();
-    }
+    DCHECK(kind == SourceRangeKind::kFinally);
+    return finally_range_;
   }
 
  private:
@@ -239,7 +219,6 @@ class SourceRangeMap final : public ZoneObject {
 // Type-checked insertion.
 #define DEFINE_MAP_INSERT(type)                         \
   void Insert(type* node, type##SourceRanges* ranges) { \
-    DCHECK_NOT_NULL(node);                              \
     map_.emplace(node, ranges);                         \
   }
   AST_SOURCE_RANGE_LIST(DEFINE_MAP_INSERT)
@@ -248,6 +227,8 @@ class SourceRangeMap final : public ZoneObject {
  private:
   ZoneMap<AstNode*, AstNodeSourceRanges*> map_;
 };
+
+#undef AST_SOURCE_RANGE_LIST
 
 }  // namespace internal
 }  // namespace v8

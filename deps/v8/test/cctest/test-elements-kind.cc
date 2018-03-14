@@ -16,8 +16,8 @@
 #include "src/ic/stub-cache.h"
 #include "src/objects-inl.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 //
 // Helper functions.
@@ -478,6 +478,3 @@ TEST(JSArrayAddingElementsGeneralizingiFastDoubleElements) {
       .Check();
   CHECK_EQ(array->map(), *previous_map);
 }
-
-}  // namespace internal
-}  // namespace v8

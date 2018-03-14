@@ -82,8 +82,7 @@ class CodeGenerator final : public GapResolver::Assembler {
   explicit CodeGenerator(Zone* codegen_zone, Frame* frame, Linkage* linkage,
                          InstructionSequence* code, CompilationInfo* info,
                          base::Optional<OsrHelper> osr_helper,
-                         int start_source_position,
-                         JumpOptimizationInfo* jump_opt);
+                         int start_source_position);
 
   // Generate native code. After calling AssembleCode, call FinalizeCode to
   // produce the actual code object. If an error occurs during either phase,
@@ -150,14 +149,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   // adjusted stack pointer is returned in |slot|.
   bool GetSlotAboveSPBeforeTailCall(Instruction* instr, int* slot);
 
-  CodeGenResult AssembleDeoptimizerCall(int deoptimization_id,
-                                        SourcePosition pos);
-
   // ===========================================================================
   // ============= Architecture-specific code generation methods. ==============
   // ===========================================================================
-
-  CodeGenResult FinalizeAssembleDeoptimizerCall(Address deoptimization_entry);
 
   CodeGenResult AssembleArchInstruction(Instruction* instr);
   void AssembleArchJump(RpoNumber target);
@@ -166,6 +160,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   void AssembleArchTrap(Instruction* instr, FlagsCondition condition);
   void AssembleArchLookupSwitch(Instruction* instr);
   void AssembleArchTableSwitch(Instruction* instr);
+
+  CodeGenResult AssembleDeoptimizerCall(int deoptimization_id,
+                                        SourcePosition pos);
 
   // Generates an architecture-specific, descriptor-specific prologue
   // to set up a stack frame.
@@ -186,9 +183,10 @@ class CodeGenerator final : public GapResolver::Assembler {
 
   enum PushTypeFlag {
     kImmediatePush = 0x1,
-    kRegisterPush = 0x2,
-    kStackSlotPush = 0x4,
-    kScalarPush = kRegisterPush | kStackSlotPush
+    kScalarPush = 0x2,
+    kFloat32Push = 0x4,
+    kFloat64Push = 0x8,
+    kFloatPush = kFloat32Push | kFloat64Push
   };
 
   typedef base::Flags<PushTypeFlag> PushTypeFlags;
@@ -268,6 +266,7 @@ class CodeGenerator final : public GapResolver::Assembler {
                                              Translation* translation);
   void AddTranslationForOperand(Translation* translation, Instruction* instr,
                                 InstructionOperand* op, MachineType type);
+  void EnsureSpaceForLazyDeopt();
   void MarkLazyDeoptSite();
 
   DeoptimizationExit* AddDeoptimizationExit(Instruction* instr,
@@ -283,13 +282,16 @@ class CodeGenerator final : public GapResolver::Assembler {
           translation_id_(translation_id),
           pc_offset_(pc_offset),
           kind_(kind),
-          reason_(reason) {}
+          reason_(reason),
+          trampoline_pc_(-1) {}
 
     BailoutId bailout_id() const { return bailout_id_; }
     int translation_id() const { return translation_id_; }
     int pc_offset() const { return pc_offset_; }
     DeoptimizeKind kind() const { return kind_; }
     DeoptimizeReason reason() const { return reason_; }
+    int trampoline_pc() { return trampoline_pc_; }
+    void set_trampoline_pc(int t_pc) { trampoline_pc_ = t_pc; }
 
    private:
     BailoutId bailout_id_;
@@ -297,6 +299,7 @@ class CodeGenerator final : public GapResolver::Assembler {
     int pc_offset_;
     DeoptimizeKind kind_;
     DeoptimizeReason reason_;
+    int trampoline_pc_;
   };
 
   struct HandlerInfo {
@@ -305,7 +308,6 @@ class CodeGenerator final : public GapResolver::Assembler {
   };
 
   friend class OutOfLineCode;
-  friend class CodeGeneratorTester;
 
   Zone* zone_;
   FrameAccessState* frame_access_state_;

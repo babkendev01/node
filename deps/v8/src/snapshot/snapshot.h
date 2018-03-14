@@ -8,8 +8,6 @@
 #include "src/snapshot/partial-serializer.h"
 #include "src/snapshot/startup-serializer.h"
 
-#include "src/utils.h"
-
 namespace v8 {
 namespace internal {
 
@@ -48,11 +46,9 @@ class SnapshotData : public SerializedData {
   // [4] payload length
   // ... reservations
   // ... serialized payload
-  static const uint32_t kNumReservationsOffset =
-      kVersionHashOffset + kUInt32Size;
-  static const uint32_t kPayloadLengthOffset =
-      kNumReservationsOffset + kUInt32Size;
-  static const uint32_t kHeaderSize = kPayloadLengthOffset + kUInt32Size;
+  static const int kNumReservationsOffset = kVersionHashOffset + kInt32Size;
+  static const int kPayloadLengthOffset = kNumReservationsOffset + kInt32Size;
+  static const int kHeaderSize = kPayloadLengthOffset + kInt32Size;
 };
 
 class Snapshot : public AllStatic {
@@ -75,28 +71,18 @@ class Snapshot : public AllStatic {
 
   static v8::StartupData CreateSnapshotBlob(
       const SnapshotData* startup_snapshot,
-      const std::vector<SnapshotData*>& context_snapshots,
-      bool can_be_rehashed);
+      const List<SnapshotData*>* context_snapshots, bool can_be_rehashed);
 
 #ifdef DEBUG
   static bool SnapshotIsValid(v8::StartupData* snapshot_blob);
 #endif  // DEBUG
 
  private:
-  static uint32_t ExtractNumContexts(const v8::StartupData* data);
-  static uint32_t ExtractContextOffset(const v8::StartupData* data,
-                                       uint32_t index);
+  static int ExtractNumContexts(const v8::StartupData* data);
   static bool ExtractRehashability(const v8::StartupData* data);
   static Vector<const byte> ExtractStartupData(const v8::StartupData* data);
   static Vector<const byte> ExtractContextData(const v8::StartupData* data,
-                                               uint32_t index);
-
-  static uint32_t GetHeaderValue(const v8::StartupData* data, uint32_t offset) {
-    return ReadLittleEndianValue<uint32_t>(data->data + offset);
-  }
-  static void SetHeaderValue(char* data, uint32_t offset, uint32_t value) {
-    WriteLittleEndianValue(data + offset, value);
-  }
+                                               int index);
 
   // Snapshot blob layout:
   // [0] number of contexts N
@@ -109,18 +95,17 @@ class Snapshot : public AllStatic {
   // ... context 0 snapshot data
   // ... context 1 snapshot data
 
-  static const uint32_t kNumberOfContextsOffset = 0;
+  static const int kNumberOfContextsOffset = 0;
   // TODO(yangguo): generalize rehashing, and remove this flag.
-  static const uint32_t kRehashabilityOffset =
-      kNumberOfContextsOffset + kUInt32Size;
-  static const uint32_t kFirstContextOffsetOffset =
-      kRehashabilityOffset + kUInt32Size;
+  static const int kRehashabilityOffset = kNumberOfContextsOffset + kInt32Size;
+  static const int kFirstContextOffsetOffset =
+      kRehashabilityOffset + kInt32Size;
 
-  static uint32_t StartupSnapshotOffset(int num_contexts) {
+  static int StartupSnapshotOffset(int num_contexts) {
     return kFirstContextOffsetOffset + num_contexts * kInt32Size;
   }
 
-  static uint32_t ContextSnapshotOffsetOffset(int index) {
+  static int ContextSnapshotOffsetOffset(int index) {
     return kFirstContextOffsetOffset + index * kInt32Size;
   }
 

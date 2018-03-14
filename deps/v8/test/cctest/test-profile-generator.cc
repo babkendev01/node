@@ -407,10 +407,11 @@ TEST(RecordTickSample) {
   delete entry3;
 }
 
-static void CheckNodeIds(const ProfileNode* node, unsigned* expectedId) {
+
+static void CheckNodeIds(ProfileNode* node, unsigned* expectedId) {
   CHECK_EQ((*expectedId)++, node->id());
-  for (const ProfileNode* child : *node->children()) {
-    CheckNodeIds(child, expectedId);
+  for (int i = 0; i < node->children()->length(); i++) {
+    CheckNodeIds(node->children()->at(i), expectedId);
   }
 }
 
@@ -505,7 +506,8 @@ TEST(NoSamples) {
 
 static const ProfileNode* PickChild(const ProfileNode* parent,
                                     const char* name) {
-  for (const ProfileNode* child : *parent->children()) {
+  for (int i = 0; i < parent->children()->length(); ++i) {
+    const ProfileNode* child = parent->children()->at(i);
     if (strcmp(child->entry()->name(), name) == 0) return child;
   }
   return NULL;
@@ -552,10 +554,11 @@ TEST(RecordStackTraceAtStartProfiling) {
   CHECK(const_cast<ProfileNode*>(current));
   current = PickChild(current, "c");
   CHECK(const_cast<ProfileNode*>(current));
-  CHECK(current->children()->empty() || current->children()->size() == 1);
-  if (current->children()->size() == 1) {
+  CHECK(current->children()->length() == 0 ||
+        current->children()->length() == 1);
+  if (current->children()->length() == 1) {
     current = PickChild(current, "startProfiling");
-    CHECK(current->children()->empty());
+    CHECK_EQ(0, current->children()->length());
   }
 }
 
@@ -582,8 +585,7 @@ static const v8::CpuProfileNode* PickChild(const v8::CpuProfileNode* parent,
                                            const char* name) {
   for (int i = 0; i < parent->GetChildrenCount(); ++i) {
     const v8::CpuProfileNode* child = parent->GetChild(i);
-    v8::String::Utf8Value function_name(CcTest::isolate(),
-                                        child->GetFunctionName());
+    v8::String::Utf8Value function_name(child->GetFunctionName());
     if (strcmp(*function_name, name) == 0) return child;
   }
   return NULL;
@@ -709,11 +711,12 @@ TEST(BailoutReason) {
                                          .As<v8::Function>();
   i::Handle<i::JSFunction> i_function =
       i::Handle<i::JSFunction>::cast(v8::Utils::OpenHandle(*function));
-  USE(i_function);
+  // Set a high deopt count to trigger bail out.
+  i_function->shared()->set_opt_count(i::FLAG_max_deopt_count + 1);
+  i_function->shared()->set_deopt_count(i::FLAG_max_deopt_count + 1);
 
   CompileRun(
       "%OptimizeFunctionOnNextCall(Debugger);"
-      "%NeverOptimizeFunction(Debugger);"
       "Debugger();"
       "stopProfiling()");
   CHECK_EQ(1, iprofiler->GetProfilesCount());
@@ -725,11 +728,11 @@ TEST(BailoutReason) {
   // The tree should look like this:
   //  (root)
   //   ""
-  //     kOptimizationDisabledForTest
+  //     kDeoptimizedTooManyTimes
   current = PickChild(current, "");
   CHECK(const_cast<v8::CpuProfileNode*>(current));
 
   current = PickChild(current, "Debugger");
   CHECK(const_cast<v8::CpuProfileNode*>(current));
-  CHECK(!strcmp("Optimization disabled for test", current->GetBailoutReason()));
+  CHECK(!strcmp("Deoptimized too many times", current->GetBailoutReason()));
 }

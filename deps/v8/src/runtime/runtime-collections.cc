@@ -11,25 +11,48 @@
 namespace v8 {
 namespace internal {
 
+
+RUNTIME_FUNCTION(Runtime_StringGetRawHashField) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(String, string, 0);
+  return *isolate->factory()->NewNumberFromUint(string->hash_field());
+}
+
+
 RUNTIME_FUNCTION(Runtime_TheHole) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(0, args.length());
   return isolate->heap()->the_hole_value();
 }
 
-RUNTIME_FUNCTION(Runtime_GetExistingHash) {
+
+RUNTIME_FUNCTION(Runtime_JSCollectionGetTable) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
-  return object->GetHash();
+  CONVERT_ARG_CHECKED(JSObject, object, 0);
+  CHECK(object->IsJSSet() || object->IsJSMap());
+  return static_cast<JSCollection*>(object)->table();
 }
+
 
 RUNTIME_FUNCTION(Runtime_GenericHash) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
-  return object->GetOrCreateHash(isolate);
+  Smi* hash = Object::GetOrCreateHash(isolate, object);
+  return hash;
 }
+
+
+RUNTIME_FUNCTION(Runtime_SetInitialize) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSSet, holder, 0);
+  JSSet::Initialize(holder, isolate);
+  return *holder;
+}
+
 
 RUNTIME_FUNCTION(Runtime_SetGrow) {
   HandleScope scope(isolate);
@@ -61,6 +84,16 @@ RUNTIME_FUNCTION(Runtime_SetIteratorClone) {
       handle(OrderedHashSet::cast(holder->table()), isolate),
       Smi::ToInt(holder->index()));
 }
+
+
+RUNTIME_FUNCTION(Runtime_MapInitialize) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSMap, holder, 0);
+  JSMap::Initialize(holder, isolate);
+  return *holder;
+}
+
 
 RUNTIME_FUNCTION(Runtime_MapShrink) {
   HandleScope scope(isolate);

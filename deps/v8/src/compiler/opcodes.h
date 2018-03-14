@@ -48,32 +48,29 @@
   V(RelocatableInt32Constant) \
   V(RelocatableInt64Constant)
 
-#define INNER_OP_LIST(V)          \
-  V(Select)                       \
-  V(Phi)                          \
-  V(EffectPhi)                    \
-  V(InductionVariablePhi)         \
-  V(Checkpoint)                   \
-  V(BeginRegion)                  \
-  V(FinishRegion)                 \
-  V(FrameState)                   \
-  V(StateValues)                  \
-  V(TypedStateValues)             \
-  V(ArgumentsElementsState)       \
-  V(ArgumentsLengthState)         \
-  V(ObjectState)                  \
-  V(ObjectId)                     \
-  V(TypedObjectState)             \
-  V(Call)                         \
-  V(CallWithCallerSavedRegisters) \
-  V(Parameter)                    \
-  V(OsrValue)                     \
-  V(LoopExit)                     \
-  V(LoopExitValue)                \
-  V(LoopExitEffect)               \
-  V(Projection)                   \
-  V(Retain)                       \
-  V(MapGuard)                     \
+#define INNER_OP_LIST(V)    \
+  V(Select)                 \
+  V(Phi)                    \
+  V(EffectPhi)              \
+  V(InductionVariablePhi)   \
+  V(Checkpoint)             \
+  V(BeginRegion)            \
+  V(FinishRegion)           \
+  V(FrameState)             \
+  V(StateValues)            \
+  V(TypedStateValues)       \
+  V(ArgumentsElementsState) \
+  V(ArgumentsLengthState)   \
+  V(ObjectState)            \
+  V(TypedObjectState)       \
+  V(Call)                   \
+  V(Parameter)              \
+  V(OsrValue)               \
+  V(LoopExit)               \
+  V(LoopExitValue)          \
+  V(LoopExitEffect)         \
+  V(Projection)             \
+  V(Retain)                 \
   V(TypeGuard)
 
 #define COMMON_OP_LIST(V) \
@@ -120,7 +117,8 @@
   V(JSToName)                      \
   V(JSToNumber)                    \
   V(JSToObject)                    \
-  V(JSToString)
+  V(JSToString)                    \
+  V(JSToPrimitiveToString)
 
 #define JS_OTHER_UNOP_LIST(V) \
   V(JSClassOf)                \
@@ -138,9 +136,7 @@
   V(JSCreateIterResultObject)     \
   V(JSCreateKeyValueArray)        \
   V(JSCreateLiteralArray)         \
-  V(JSCreateEmptyLiteralArray)    \
   V(JSCreateLiteralObject)        \
-  V(JSCreateEmptyLiteralObject)   \
   V(JSCreateLiteralRegExp)        \
   V(JSLoadProperty)               \
   V(JSLoadNamed)                  \
@@ -185,6 +181,7 @@
   V(JSGeneratorRestoreContinuation) \
   V(JSGeneratorRestoreRegister)     \
   V(JSStackCheck)                   \
+  V(JSStringConcat)                 \
   V(JSDebugger)
 
 #define JS_OP_LIST(V)     \
@@ -273,9 +270,7 @@
   V(SpeculativeNumberBitwiseXor)                    \
   V(SpeculativeNumberShiftLeft)                     \
   V(SpeculativeNumberShiftRight)                    \
-  V(SpeculativeNumberShiftRightLogical)             \
-  V(SpeculativeSafeIntegerAdd)                      \
-  V(SpeculativeSafeIntegerSubtract)
+  V(SpeculativeNumberShiftRightLogical)
 
 #define SIMPLIFIED_NUMBER_UNOP_LIST(V) \
   V(NumberAbs)                         \
@@ -330,28 +325,28 @@
   V(CheckBounds)                    \
   V(CheckIf)                        \
   V(CheckMaps)                      \
-  V(CheckMapValue)                  \
   V(CheckNumber)                    \
   V(CheckInternalizedString)        \
   V(CheckReceiver)                  \
   V(CheckString)                    \
   V(CheckSeqString)                 \
+  V(CheckNonEmptyString)            \
   V(CheckSymbol)                    \
   V(CheckSmi)                       \
   V(CheckHeapObject)                \
   V(CheckFloat64Hole)               \
   V(CheckNotTaggedHole)             \
-  V(CompareMaps)                    \
   V(ConvertTaggedHoleToUndefined)   \
   V(Allocate)                       \
   V(LoadField)                      \
+  V(LoadBuffer)                     \
   V(LoadElement)                    \
   V(LoadTypedElement)               \
   V(StoreField)                     \
+  V(StoreBuffer)                    \
   V(StoreElement)                   \
   V(StoreTypedElement)              \
   V(TransitionAndStoreElement)      \
-  V(ObjectIsCallable)               \
   V(ObjectIsDetectableCallable)     \
   V(ObjectIsNaN)                    \
   V(ObjectIsNonCallable)            \
@@ -512,7 +507,6 @@
   MACHINE_FLOAT32_UNOP_LIST(V)  \
   MACHINE_FLOAT64_BINOP_LIST(V) \
   MACHINE_FLOAT64_UNOP_LIST(V)  \
-  V(DebugAbort)                 \
   V(DebugBreak)                 \
   V(Comment)                    \
   V(Load)                       \

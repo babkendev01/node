@@ -35,6 +35,17 @@ static inline v8::Local<v8::Value> Run(v8::Local<v8::Script> script) {
 }
 
 
+template <typename T = Object>
+Handle<T> GetGlobal(const char* name) {
+  Isolate* isolate = CcTest::i_isolate();
+  Factory* factory = isolate->factory();
+  Handle<String> str_name = factory->InternalizeUtf8String(name);
+
+  Handle<Object> value =
+      Object::GetProperty(isolate->global_object(), str_name).ToHandleChecked();
+  return Handle<T>::cast(value);
+}
+
 
 template <typename T = Object>
 Handle<T> GetLexical(const char* name) {
@@ -514,7 +525,7 @@ TEST(SubclassBasicNoInlineNew) {
 }
 
 
-// Creates class hierarchy of length matching the |hierarchy_desc| length and
+// Creates class hierachy of length matching the |hierarchy_desc| length and
 // with the number of fields at i'th level equal to |hierarchy_desc[i]|.
 static void CreateClassHierarchy(const std::vector<int>& hierarchy_desc) {
   std::ostringstream os;

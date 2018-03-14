@@ -21,7 +21,6 @@ SMI_ACCESSORS(Symbol, flags, kFlagsOffset)
 BOOL_ACCESSORS(Symbol, flags, is_private, kPrivateBit)
 BOOL_ACCESSORS(Symbol, flags, is_well_known_symbol, kWellKnownSymbolBit)
 BOOL_ACCESSORS(Symbol, flags, is_public, kPublicBit)
-BOOL_ACCESSORS(Symbol, flags, is_interesting_symbol, kInterestingSymbolBit)
 
 TYPE_CHECKER(Symbol, SYMBOL_TYPE)
 
@@ -77,10 +76,6 @@ uint32_t Name::Hash() {
   if (IsHashFieldComputed(field)) return field >> kHashShift;
   // Slow case: compute hash code and set it. Has to be a string.
   return String::cast(this)->ComputeAndSetHash();
-}
-
-bool Name::IsInterestingSymbol() const {
-  return IsSymbol() && Symbol::cast(this)->is_interesting_symbol();
 }
 
 bool Name::IsPrivate() {

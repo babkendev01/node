@@ -11,9 +11,15 @@
 // -------------------------------------------------------------------
 // Imports
 
+var GetExistingHash;
+var GetHash;
 var GlobalWeakMap = global.WeakMap;
 var GlobalWeakSet = global.WeakSet;
-var MathRandom = global.Math.random;
+
+utils.Import(function(from) {
+  GetExistingHash = from.GetExistingHash;
+  GetHash = from.GetHash;
+});
 
 // -------------------------------------------------------------------
 // Harmony WeakMap
@@ -50,7 +56,7 @@ DEFINE_METHODS(
                             'WeakMap.prototype.set', this);
       }
       if (!IS_RECEIVER(key)) throw %make_type_error(kInvalidWeakMapKey);
-      return %WeakCollectionSet(this, key, value, %GenericHash(key));
+      return %WeakCollectionSet(this, key, value, GetHash(key));
     }
 
     delete(key) {
@@ -59,7 +65,7 @@ DEFINE_METHODS(
                             'WeakMap.prototype.delete', this);
       }
       if (!IS_RECEIVER(key)) return false;
-      var hash = %GetExistingHash(key);
+      var hash = GetExistingHash(key);
       if (IS_UNDEFINED(hash)) return false;
       return %WeakCollectionDelete(this, key, hash);
     }
@@ -103,7 +109,7 @@ DEFINE_METHODS(
                             'WeakSet.prototype.add', this);
       }
       if (!IS_RECEIVER(value)) throw %make_type_error(kInvalidWeakSetValue);
-      return %WeakCollectionSet(this, value, true, %GenericHash(value));
+      return %WeakCollectionSet(this, value, true, GetHash(value));
     }
 
     delete(value) {
@@ -112,7 +118,7 @@ DEFINE_METHODS(
                             'WeakSet.prototype.delete', this);
       }
       if (!IS_RECEIVER(value)) return false;
-      var hash = %GetExistingHash(value);
+      var hash = GetExistingHash(value);
       if (IS_UNDEFINED(hash)) return false;
       return %WeakCollectionDelete(this, value, hash);
     }

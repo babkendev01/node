@@ -38,8 +38,7 @@
 #include "src/objects-inl.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
 
 static Handle<Object> GetGlobalProperty(const char* name) {
   Isolate* isolate = CcTest::i_isolate();
@@ -562,7 +561,6 @@ TEST(CompileFunctionInContextHarmonyFunctionToString) {
     v8::Local<v8::Context> context = (__local_context__);                     \
     if (try_catch.HasCaught()) {                                              \
       v8::String::Utf8Value error(                                            \
-          CcTest::isolate(),                                                  \
           try_catch.Exception()->ToString(context).ToLocalChecked());         \
       V8_Fatal(__FILE__, __LINE__,                                            \
                "Unexpected exception thrown during %s:\n\t%s\n", op, *error); \
@@ -707,6 +705,3 @@ TEST(InvocationCount) {
   CompileRun("foo(); foo()");
   CHECK_EQ(4, foo->feedback_vector()->invocation_count());
 }
-
-}  // namespace internal
-}  // namespace v8

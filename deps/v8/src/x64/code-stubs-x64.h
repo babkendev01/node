@@ -9,6 +9,9 @@ namespace v8 {
 namespace internal {
 
 
+void ArrayNativeCode(MacroAssembler* masm, Label* call_generic_code);
+
+
 class StringHelper : public AllStatic {
  public:
   // Compares two flat one-byte strings and returns result in rax.
@@ -275,7 +278,7 @@ class RecordWriteStub: public PlatformCodeStub {
                                   Register r2,
                                   Register r3) {
       for (int i = 0; i < Register::kNumRegisters; i++) {
-        if (RegisterConfiguration::Default()->IsAllocatableGeneralCode(i)) {
+        if (RegisterConfiguration::Crankshaft()->IsAllocatableGeneralCode(i)) {
           Register candidate = Register::from_code(i);
           if (candidate.is(rcx)) continue;
           if (candidate.is(r1)) continue;

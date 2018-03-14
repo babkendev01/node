@@ -36,8 +36,8 @@
 #include "src/conversions.h"
 #include "test/cctest/cctest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
+
 
 TEST(Utils1) {
   CHECK_EQ(-1000000, FastD2I(-1000000.0));
@@ -287,6 +287,3 @@ TEST(CPlusPlus11Features) {
     j += 11;
   }
 }
-
-}  // namespace internal
-}  // namespace v8

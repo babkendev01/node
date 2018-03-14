@@ -63,7 +63,7 @@ class V8_EXPORT_PRIVATE Node final {
                                : inputs_.outline_->count_;
   }
 
-#ifdef DEBUG
+#if DEBUG
   void Verify();
 #define BOUNDS_CHECK(index)                                                  \
   do {                                                                       \
@@ -593,14 +593,7 @@ class Node::Uses::const_iterator final {
   typedef Node** pointer;
   typedef Node*& reference;
 
-  const_iterator(const const_iterator& other)
-      : current_(other.current_)
-#ifdef DEBUG
-        ,
-        next_(other.next_)
-#endif
-  {
-  }
+  const_iterator(const const_iterator& other) : current_(other.current_) {}
 
   Node* operator*() const { return current_->from(); }
   bool operator==(const const_iterator& other) const {
@@ -611,13 +604,7 @@ class Node::Uses::const_iterator final {
   }
   const_iterator& operator++() {
     DCHECK_NOT_NULL(current_);
-    // Checking no use gets mutated while iterating through them, a potential
-    // very tricky cause of bug.
     current_ = current_->next;
-#ifdef DEBUG
-    DCHECK_EQ(current_, next_);
-    next_ = current_ ? current_->next : nullptr;
-#endif
     return *this;
   }
   const_iterator operator++(int);
@@ -626,19 +613,9 @@ class Node::Uses::const_iterator final {
   friend class Node::Uses;
 
   const_iterator() : current_(nullptr) {}
-  explicit const_iterator(Node* node)
-      : current_(node->first_use_)
-#ifdef DEBUG
-        ,
-        next_(current_ ? current_->next : nullptr)
-#endif
-  {
-  }
+  explicit const_iterator(Node* node) : current_(node->first_use_) {}
 
   Node::Use* current_;
-#ifdef DEBUG
-  Node::Use* next_;
-#endif
 };
 
 

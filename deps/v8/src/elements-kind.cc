@@ -66,9 +66,8 @@ const char* ElementsKindToString(ElementsKind kind) {
 
 
 struct InitializeFastElementsKindSequence {
-  static void Construct(void* fast_elements_kind_sequence_ptr_arg) {
-    auto fast_elements_kind_sequence_ptr =
-        reinterpret_cast<ElementsKind**>(fast_elements_kind_sequence_ptr_arg);
+  static void Construct(
+      ElementsKind** fast_elements_kind_sequence_ptr) {
     ElementsKind* fast_elements_kind_sequence =
         new ElementsKind[kFastElementsKindCount];
     *fast_elements_kind_sequence_ptr = fast_elements_kind_sequence;

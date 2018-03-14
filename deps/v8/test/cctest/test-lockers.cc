@@ -193,16 +193,16 @@ class IsolateLockingThreadWithLocalContext : public JoinableThread {
   v8::Isolate* isolate_;
 };
 
-static void StartJoinAndDeleteThreads(
-    const std::vector<JoinableThread*>& threads) {
-  for (const auto& thread : threads) {
-    thread->Start();
+
+static void StartJoinAndDeleteThreads(const i::List<JoinableThread*>& threads) {
+  for (int i = 0; i < threads.length(); i++) {
+    threads[i]->Start();
   }
-  for (const auto& thread : threads) {
-    thread->Join();
+  for (int i = 0; i < threads.length(); i++) {
+    threads[i]->Join();
   }
-  for (const auto& thread : threads) {
-    delete thread;
+  for (int i = 0; i < threads.length(); i++) {
+    delete threads[i];
   }
 }
 
@@ -215,13 +215,12 @@ TEST(IsolateLockingStress) {
 #else
   const int kNThreads = 100;
 #endif
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);
   for (int i = 0; i < kNThreads; i++) {
-    threads.push_back(new IsolateLockingThreadWithLocalContext(isolate));
+    threads.Add(new IsolateLockingThreadWithLocalContext(isolate));
   }
   StartJoinAndDeleteThreads(threads);
   isolate->Dispose();
@@ -263,10 +262,9 @@ TEST(IsolateNestedLocking) {
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   for (int i = 0; i < kNThreads; i++) {
-    threads.push_back(new IsolateNestedLockingThread(isolate));
+    threads.Add(new IsolateNestedLockingThread(isolate));
   }
   StartJoinAndDeleteThreads(threads);
   isolate->Dispose();
@@ -310,11 +308,10 @@ TEST(SeparateIsolatesLocksNonexclusive) {
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate1 = v8::Isolate::New(create_params);
   v8::Isolate* isolate2 = v8::Isolate::New(create_params);
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   for (int i = 0; i < kNThreads; i++) {
-    threads.push_back(
-        new SeparateIsolatesLocksNonexclusiveThread(isolate1, isolate2));
+    threads.Add(new SeparateIsolatesLocksNonexclusiveThread(isolate1,
+                                                             isolate2));
   }
   StartJoinAndDeleteThreads(threads);
   isolate2->Dispose();
@@ -391,13 +388,12 @@ TEST(LockerUnlocker) {
 #else
   const int kNThreads = 100;
 #endif
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);
   for (int i = 0; i < kNThreads; i++) {
-    threads.push_back(new LockerUnlockerThread(isolate));
+    threads.Add(new LockerUnlockerThread(isolate));
   }
   StartJoinAndDeleteThreads(threads);
   isolate->Dispose();
@@ -449,13 +445,12 @@ TEST(LockTwiceAndUnlock) {
 #else
   const int kNThreads = 100;
 #endif
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);
   for (int i = 0; i < kNThreads; i++) {
-    threads.push_back(new LockTwiceAndUnlockThread(isolate));
+    threads.Add(new LockTwiceAndUnlockThread(isolate));
   }
   StartJoinAndDeleteThreads(threads);
   isolate->Dispose();
@@ -579,15 +574,15 @@ TEST(LockUnlockLockMultithreaded) {
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
   v8::Isolate* isolate = v8::Isolate::New(create_params);
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   {
     v8::Locker locker_(isolate);
     v8::Isolate::Scope isolate_scope(isolate);
     v8::HandleScope handle_scope(isolate);
     v8::Local<v8::Context> context = v8::Context::New(isolate);
     for (int i = 0; i < kNThreads; i++) {
-      threads.push_back(new LockUnlockLockThread(isolate, context));
+      threads.Add(new LockUnlockLockThread(
+          isolate, context));
     }
   }
   StartJoinAndDeleteThreads(threads);
@@ -637,15 +632,14 @@ TEST(LockUnlockLockDefaultIsolateMultithreaded) {
   const int kNThreads = 100;
 #endif
   Local<v8::Context> context;
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   {
     v8::Locker locker_(CcTest::isolate());
     v8::Isolate::Scope isolate_scope(CcTest::isolate());
     v8::HandleScope handle_scope(CcTest::isolate());
     context = v8::Context::New(CcTest::isolate());
     for (int i = 0; i < kNThreads; i++) {
-      threads.push_back(new LockUnlockLockDefaultIsolateThread(context));
+      threads.Add(new LockUnlockLockDefaultIsolateThread(context));
     }
   }
   StartJoinAndDeleteThreads(threads);
@@ -667,7 +661,7 @@ TEST(Regress1433) {
       v8::Local<Script> script =
           v8::Script::Compile(context, source).ToLocalChecked();
       v8::Local<Value> result = script->Run(context).ToLocalChecked();
-      v8::String::Utf8Value utf8(isolate, result);
+      v8::String::Utf8Value utf8(result);
     }
     isolate->Dispose();
   }
@@ -737,10 +731,9 @@ TEST(ExtensionsRegistration) {
   const char* extension_names[] = { "test0", "test1",
                                     "test2", "test3", "test4",
                                     "test5", "test6", "test7" };
-  std::vector<JoinableThread*> threads;
-  threads.reserve(kNThreads);
+  i::List<JoinableThread*> threads(kNThreads);
   for (int i = 0; i < kNThreads; i++) {
-    threads.push_back(new IsolateGenesisThread(8, extension_names));
+    threads.Add(new IsolateGenesisThread(8, extension_names));
   }
   StartJoinAndDeleteThreads(threads);
 }

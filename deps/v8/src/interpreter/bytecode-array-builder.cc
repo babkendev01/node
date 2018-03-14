@@ -461,6 +461,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::GetSuperConstructor(Register out) {
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::CompareOperation(
     Token::Value op, Register reg, int feedback_slot) {
+  DCHECK(feedback_slot != kNoFeedbackSlot);
   switch (op) {
     case Token::Value::EQ:
       OutputTestEqual(reg, feedback_slot);
@@ -629,10 +630,6 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::LoadTrue() {
 BytecodeArrayBuilder& BytecodeArrayBuilder::LoadFalse() {
   OutputLdaFalse();
   return *this;
-}
-
-BytecodeArrayBuilder& BytecodeArrayBuilder::LoadBoolean(bool value) {
-  return value ? LoadTrue() : LoadFalse();
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::LoadAccumulatorWithRegister(
@@ -957,12 +954,6 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CreateRegExpLiteral(
   return *this;
 }
 
-BytecodeArrayBuilder& BytecodeArrayBuilder::CreateEmptyArrayLiteral(
-    int literal_index) {
-  OutputCreateEmptyArrayLiteral(literal_index);
-  return *this;
-}
-
 BytecodeArrayBuilder& BytecodeArrayBuilder::CreateArrayLiteral(
     size_t constant_elements_entry, int literal_index, int flags) {
   OutputCreateArrayLiteral(constant_elements_entry, literal_index, flags);
@@ -974,11 +965,6 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CreateObjectLiteral(
     Register output) {
   OutputCreateObjectLiteral(constant_properties_entry, literal_index, flags,
                             output);
-  return *this;
-}
-
-BytecodeArrayBuilder& BytecodeArrayBuilder::CreateEmptyObjectLiteral() {
-  OutputCreateEmptyObjectLiteral();
   return *this;
 }
 
@@ -1005,6 +991,18 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::ToName(Register out) {
 BytecodeArrayBuilder& BytecodeArrayBuilder::ToNumber(Register out,
                                                      int feedback_slot) {
   OutputToNumber(out, feedback_slot);
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::ToPrimitiveToString(
+    Register out, int feedback_slot) {
+  OutputToPrimitiveToString(out, feedback_slot);
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::StringConcat(
+    RegisterList operand_registers) {
+  OutputStringConcat(operand_registers, operand_registers.register_count());
   return *this;
 }
 
@@ -1253,9 +1251,8 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::LoadModuleVariable(int cell_index,
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::SuspendGenerator(
-    Register generator, RegisterList registers, int suspend_id) {
-  OutputSuspendGenerator(generator, registers, registers.register_count(),
-                         suspend_id);
+    Register generator, RegisterList registers) {
+  OutputSuspendGenerator(generator, registers, registers.register_count());
   return *this;
 }
 
@@ -1335,9 +1332,8 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CallAnyReceiver(Register callable,
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::CallWithSpread(Register callable,
-                                                           RegisterList args,
-                                                           int feedback_slot) {
-  OutputCallWithSpread(callable, args, args.register_count(), feedback_slot);
+                                                           RegisterList args) {
+  OutputCallWithSpread(callable, args, args.register_count());
   return *this;
 }
 
@@ -1349,9 +1345,8 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::Construct(Register constructor,
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::ConstructWithSpread(
-    Register constructor, RegisterList args, int feedback_slot_id) {
-  OutputConstructWithSpread(constructor, args, args.register_count(),
-                            feedback_slot_id);
+    Register constructor, RegisterList args) {
+  OutputConstructWithSpread(constructor, args, args.register_count());
   return *this;
 }
 
@@ -1460,7 +1455,8 @@ bool BytecodeArrayBuilder::RegisterIsValid(Register reg) const {
     return false;
   }
 
-  if (reg.is_current_context() || reg.is_function_closure()) {
+  if (reg.is_current_context() || reg.is_function_closure() ||
+      reg.is_new_target()) {
     return true;
   } else if (reg.is_parameter()) {
     int parameter_index = reg.ToParameterIndex(parameter_count());

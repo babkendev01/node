@@ -9,7 +9,6 @@
 #include "src/base/flags.h"
 #include "src/globals.h"
 #include "src/machine-type.h"
-#include "src/utils.h"
 
 namespace v8 {
 namespace internal {
@@ -168,12 +167,16 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
    public:
     enum UnalignedAccessSupport { kNoSupport, kSomeSupport, kFullSupport };
 
-    bool IsUnalignedLoadSupported(MachineRepresentation rep) const {
-      return IsUnalignedSupported(unalignedLoadUnsupportedTypes_, rep);
+    bool IsUnalignedLoadSupported(const MachineType& machineType,
+                                  uint8_t alignment) const {
+      return IsUnalignedSupported(unalignedLoadUnsupportedTypes_, machineType,
+                                  alignment);
     }
 
-    bool IsUnalignedStoreSupported(MachineRepresentation rep) const {
-      return IsUnalignedSupported(unalignedStoreUnsupportedTypes_, rep);
+    bool IsUnalignedStoreSupported(const MachineType& machineType,
+                                   uint8_t alignment) const {
+      return IsUnalignedSupported(unalignedStoreUnsupportedTypes_, machineType,
+                                  alignment);
     }
 
     static AlignmentRequirements FullUnalignedAccessSupport() {
@@ -183,8 +186,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
       return AlignmentRequirements(kNoSupport);
     }
     static AlignmentRequirements SomeUnalignedAccessUnsupported(
-        EnumSet<MachineRepresentation> unalignedLoadUnsupportedTypes,
-        EnumSet<MachineRepresentation> unalignedStoreUnsupportedTypes) {
+        const Vector<MachineType>& unalignedLoadUnsupportedTypes,
+        const Vector<MachineType>& unalignedStoreUnsupportedTypes) {
       return AlignmentRequirements(kSomeSupport, unalignedLoadUnsupportedTypes,
                                    unalignedStoreUnsupportedTypes);
     }
@@ -192,32 +195,36 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
    private:
     explicit AlignmentRequirements(
         AlignmentRequirements::UnalignedAccessSupport unalignedAccessSupport,
-        EnumSet<MachineRepresentation> unalignedLoadUnsupportedTypes =
-            EnumSet<MachineRepresentation>(),
-        EnumSet<MachineRepresentation> unalignedStoreUnsupportedTypes =
-            EnumSet<MachineRepresentation>())
+        Vector<MachineType> unalignedLoadUnsupportedTypes =
+            Vector<MachineType>(NULL, 0),
+        Vector<MachineType> unalignedStoreUnsupportedTypes =
+            Vector<MachineType>(NULL, 0))
         : unalignedSupport_(unalignedAccessSupport),
           unalignedLoadUnsupportedTypes_(unalignedLoadUnsupportedTypes),
           unalignedStoreUnsupportedTypes_(unalignedStoreUnsupportedTypes) {}
 
-    bool IsUnalignedSupported(EnumSet<MachineRepresentation> unsupported,
-                              MachineRepresentation rep) const {
+    bool IsUnalignedSupported(const Vector<MachineType>& unsupported,
+                              const MachineType& machineType,
+                              uint8_t alignment) const {
       // All accesses of bytes in memory are aligned.
-      DCHECK_NE(MachineRepresentation::kWord8, rep);
-      switch (unalignedSupport_) {
-        case kFullSupport:
-          return true;
-        case kNoSupport:
-          return false;
-        case kSomeSupport:
-          return !unsupported.Contains(rep);
+      DCHECK_NE(machineType.representation(), MachineRepresentation::kWord8);
+      if (unalignedSupport_ == kFullSupport) {
+        return true;
+      } else if (unalignedSupport_ == kNoSupport) {
+        return false;
+      } else {
+        for (MachineType m : unsupported) {
+          if (m == machineType) {
+            return false;
+          }
+        }
+        return true;
       }
-      UNREACHABLE();
     }
 
     const AlignmentRequirements::UnalignedAccessSupport unalignedSupport_;
-    const EnumSet<MachineRepresentation> unalignedLoadUnsupportedTypes_;
-    const EnumSet<MachineRepresentation> unalignedStoreUnsupportedTypes_;
+    const Vector<MachineType> unalignedLoadUnsupportedTypes_;
+    const Vector<MachineType> unalignedStoreUnsupportedTypes_;
   };
 
   explicit MachineOperatorBuilder(
@@ -228,7 +235,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
           AlignmentRequirements::FullUnalignedAccessSupport());
 
   const Operator* Comment(const char* msg);
-  const Operator* DebugAbort();
   const Operator* DebugBreak();
   const Operator* UnsafePointerAdd();
 
@@ -631,12 +637,16 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   bool Is64() const { return word() == MachineRepresentation::kWord64; }
   MachineRepresentation word() const { return word_; }
 
-  bool UnalignedLoadSupported(MachineRepresentation rep) {
-    return alignment_requirements_.IsUnalignedLoadSupported(rep);
+  bool UnalignedLoadSupported(const MachineType& machineType,
+                              uint8_t alignment) {
+    return alignment_requirements_.IsUnalignedLoadSupported(machineType,
+                                                            alignment);
   }
 
-  bool UnalignedStoreSupported(MachineRepresentation rep) {
-    return alignment_requirements_.IsUnalignedStoreSupported(rep);
+  bool UnalignedStoreSupported(const MachineType& machineType,
+                               uint8_t alignment) {
+    return alignment_requirements_.IsUnalignedStoreSupported(machineType,
+                                                             alignment);
   }
 
 // Pseudo operators that translate to 32/64-bit operators depending on the

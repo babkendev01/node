@@ -129,25 +129,20 @@ Running test: testRejectedPromiseWithSyntaxError
 
 Running test: testPrimitiveValueInsteadOfPromise
 {
-    id : <messageId>
-    result : {
-        result : {
-            type : boolean
-            value : true
-        }
+    error : {
+        code : -32000
+        message : Result of the evaluation is not a promise
     }
+    id : <messageId>
 }
 
 Running test: testObjectInsteadOfPromise
 {
-    id : <messageId>
-    result : {
-        result : {
-            type : object
-            value : {
-            }
-        }
+    error : {
+        code : -32000
+        message : Result of the evaluation is not a promise
     }
+    id : <messageId>
 }
 
 Running test: testPendingPromise
@@ -186,64 +181,3 @@ Running test: testExceptionInEvaluate
         }
     }
 }
-
-Running test: testThenableJob
-{
-    id : <messageId>
-    result : {
-        result : {
-            description : 42
-            type : number
-            value : 42
-        }
-    }
-}
-
-Running test: testLastEvaluatedResult
-{
-    id : <messageId>
-    result : {
-        result : {
-            description : 42
-            type : number
-            value : 42
-        }
-    }
-}
-{
-    id : <messageId>
-    result : {
-        result : {
-            description : 42
-            type : number
-            value : 42
-        }
-    }
-}
-
-Running test: testRuntimeDisable
-Resolving promise..
-{
-    id : <messageId>
-    result : {
-        result : {
-            className : Object
-            description : Object
-            objectId : <objectId>
-            type : object
-        }
-    }
-}
-Promise resolved
-
-Running test: testImmediatelyResolvedAfterAfterContextDestroyed
-Destroying context..
-{
-    error : {
-        code : -32000
-        message : Execution context was destroyed.
-    }
-    id : <messageId>
-}
-Context destroyed
-Triggering weak callback..

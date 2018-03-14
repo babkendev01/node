@@ -228,8 +228,6 @@ void ControlEquivalence::BracketListTRACE(BracketList& blist) {
   }
 }
 
-#undef TRACE
-
 }  // namespace compiler
 }  // namespace internal
 }  // namespace v8

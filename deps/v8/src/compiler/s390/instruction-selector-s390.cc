@@ -6,7 +6,7 @@
 #include "src/compiler/instruction-selector-impl.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
-#include "src/frame-constants.h"
+#include "src/s390/frames-s390.h"
 
 namespace v8 {
 namespace internal {
@@ -706,11 +706,6 @@ void InstructionSelector::VisitStackSlot(Node* node) {
 
   Emit(kArchStackSlot, g.DefineAsRegister(node),
        sequence()->AddImmediate(Constant(slot)), 0, nullptr);
-}
-
-void InstructionSelector::VisitDebugAbort(Node* node) {
-  S390OperandGenerator g(this);
-  Emit(kArchDebugAbort, g.NoOutput(), g.UseFixed(node->InputAt(0), r3));
 }
 
 void InstructionSelector::VisitLoad(Node* node) {

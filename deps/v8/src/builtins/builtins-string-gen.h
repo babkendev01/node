@@ -24,6 +24,10 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
                         Label* if_equal, Label* if_not_equal,
                         Label* if_notbothdirectonebyte);
 
+  // String concatenation.
+  Node* ConcatenateStrings(Node* context, Node* first_arg_ptr, Node* arg_count,
+                           Label* bailout_to_runtime);
+
  protected:
   Node* DirectStringData(Node* string, Node* string_instance_type);
 
@@ -49,17 +53,20 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
                                           Node* right,
                                           RelationalComparisonMode mode);
 
-  TNode<Smi> ToSmiBetweenZeroAnd(SloppyTNode<Context> context,
-                                 SloppyTNode<Object> value,
-                                 SloppyTNode<Smi> limit);
+  Node* ToSmiBetweenZeroAnd(Node* context, Node* value, Node* limit);
 
-  TNode<Uint32T> LoadSurrogatePairAt(SloppyTNode<String> string,
-                                     SloppyTNode<Smi> length,
-                                     SloppyTNode<Smi> index,
-                                     UnicodeEncoding encoding);
+  Node* LoadSurrogatePairAt(Node* string, Node* length, Node* index,
+                            UnicodeEncoding encoding);
 
-  void StringIndexOf(Node* const subject_string, Node* const search_string,
-                     Node* const position, std::function<void(Node*)> f_return);
+  Node* ConcatenateSequentialStrings(Node* context, Node* first_arg_ptr,
+                                     Node* arg_count, Node* total_length,
+                                     String::Encoding encoding);
+
+  void StringIndexOf(Node* const subject_string,
+                     Node* const subject_instance_type,
+                     Node* const search_string,
+                     Node* const search_instance_type, Node* const position,
+                     std::function<void(Node*)> f_return);
 
   Node* IndexOfDollarChar(Node* const context, Node* const string);
 
@@ -91,17 +98,6 @@ class StringBuiltinsAssembler : public CodeStubAssembler {
                                  const NodeFunction0& regexp_call,
                                  const NodeFunction1& generic_call,
                                  CodeStubArguments* args = nullptr);
-};
-
-class StringIncludesIndexOfAssembler : public StringBuiltinsAssembler {
- public:
-  explicit StringIncludesIndexOfAssembler(compiler::CodeAssemblerState* state)
-      : StringBuiltinsAssembler(state) {}
-
- protected:
-  enum SearchVariant { kIncludes, kIndexOf };
-
-  void Generate(SearchVariant variant);
 };
 
 }  // namespace internal

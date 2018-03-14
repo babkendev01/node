@@ -629,12 +629,6 @@ bool EffectControlLinearizer::TryWireInStateEffect(Node* node,
     case IrOpcode::kCheckMaps:
       result = LowerCheckMaps(node, frame_state);
       break;
-    case IrOpcode::kCompareMaps:
-      result = LowerCompareMaps(node);
-      break;
-    case IrOpcode::kCheckMapValue:
-      LowerCheckMapValue(node, frame_state);
-      break;
     case IrOpcode::kCheckNumber:
       result = LowerCheckNumber(node, frame_state);
       break;
@@ -649,6 +643,9 @@ bool EffectControlLinearizer::TryWireInStateEffect(Node* node,
       break;
     case IrOpcode::kCheckSeqString:
       result = LowerCheckSeqString(node, frame_state);
+      break;
+    case IrOpcode::kCheckNonEmptyString:
+      result = LowerCheckNonEmptyString(node, frame_state);
       break;
     case IrOpcode::kCheckInternalizedString:
       result = LowerCheckInternalizedString(node, frame_state);
@@ -714,9 +711,6 @@ bool EffectControlLinearizer::TryWireInStateEffect(Node* node,
       break;
     case IrOpcode::kCheckedTruncateTaggedToWord32:
       result = LowerCheckedTruncateTaggedToWord32(node, frame_state);
-      break;
-    case IrOpcode::kObjectIsCallable:
-      result = LowerObjectIsCallable(node);
       break;
     case IrOpcode::kObjectIsDetectableCallable:
       result = LowerObjectIsDetectableCallable(node);
@@ -866,9 +860,12 @@ Node* EffectControlLinearizer::LowerChangeFloat64ToTagged(Node* node) {
   CheckForMinusZeroMode mode = CheckMinusZeroModeOf(node->op());
   Node* value = node->InputAt(0);
 
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
-  auto if_heapnumber = __ MakeDeferredLabel();
-  auto if_int32 = __ MakeLabel();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
+  auto if_heapnumber =
+      __ MakeLabelFor(GraphAssemblerLabelType::kNonDeferred,
+                      1 + (mode == CheckForMinusZeroMode::kCheckForMinusZero) +
+                          !machine()->Is64());
+  auto if_int32 = __ MakeLabel<1>();
 
   Node* value32 = __ RoundFloat64ToInt32(value);
   __ GotoIf(__ Float64Equal(value, __ ChangeInt32ToFloat64(value32)),
@@ -879,8 +876,8 @@ Node* EffectControlLinearizer::LowerChangeFloat64ToTagged(Node* node) {
   {
     if (mode == CheckForMinusZeroMode::kCheckForMinusZero) {
       Node* zero = __ Int32Constant(0);
-      auto if_zero = __ MakeDeferredLabel();
-      auto if_smi = __ MakeLabel();
+      auto if_zero = __ MakeDeferredLabel<1>();
+      auto if_smi = __ MakeLabel<2>();
 
       __ GotoIf(__ Word32Equal(value32, zero), &if_zero);
       __ Goto(&if_smi);
@@ -926,8 +923,8 @@ Node* EffectControlLinearizer::LowerChangeFloat64ToTaggedPointer(Node* node) {
 Node* EffectControlLinearizer::LowerChangeBitToTagged(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_true = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto if_true = __ MakeLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
 
   __ GotoIf(value, &if_true);
   __ Goto(&done, __ FalseConstant());
@@ -951,8 +948,8 @@ Node* EffectControlLinearizer::LowerChangeInt32ToTagged(Node* node) {
     return ChangeInt32ToSmi(value);
   }
 
-  auto if_overflow = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto if_overflow = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
 
   Node* add = __ Int32AddWithOverflow(value, value);
   Node* ovf = __ Projection(1, add);
@@ -970,11 +967,11 @@ Node* EffectControlLinearizer::LowerChangeInt32ToTagged(Node* node) {
 Node* EffectControlLinearizer::LowerChangeUint32ToTagged(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_in_smi_range = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto if_not_in_smi_range = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
 
   Node* check = __ Uint32LessThanOrEqual(value, SmiMaxValueConstant());
-  __ GotoIfNot(check, &if_not_in_smi_range);
+  __ GotoUnless(check, &if_not_in_smi_range);
   __ Goto(&done, ChangeUint32ToSmi(value));
 
   __ Bind(&if_not_in_smi_range);
@@ -999,9 +996,9 @@ Node* EffectControlLinearizer::LowerChangeTaggedToBit(Node* node) {
 Node* EffectControlLinearizer::LowerTruncateTaggedToBit(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeDeferredLabel();
-  auto if_heapnumber = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeDeferredLabel<1>();
+  auto if_heapnumber = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<6>(MachineRepresentation::kBit);
 
   Node* zero = __ Int32Constant(0);
   Node* fzero = __ Float64Constant(0.0);
@@ -1022,7 +1019,7 @@ Node* EffectControlLinearizer::LowerTruncateTaggedToBit(Node* node) {
   // Check if the {value} is undetectable and immediately return false.
   Node* value_map_bitfield =
       __ LoadField(AccessBuilder::ForMapBitField(), value_map);
-  __ GotoIfNot(
+  __ GotoUnless(
       __ Word32Equal(__ Word32And(value_map_bitfield,
                                   __ Int32Constant(1 << Map::kIsUndetectable)),
                      zero),
@@ -1058,8 +1055,8 @@ Node* EffectControlLinearizer::LowerTruncateTaggedToBit(Node* node) {
 Node* EffectControlLinearizer::LowerTruncateTaggedPointerToBit(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_heapnumber = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_heapnumber = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<5>(MachineRepresentation::kBit);
 
   Node* zero = __ Int32Constant(0);
   Node* fzero = __ Float64Constant(0.0);
@@ -1076,7 +1073,7 @@ Node* EffectControlLinearizer::LowerTruncateTaggedPointerToBit(Node* node) {
   // Check if the {value} is undetectable and immediately return false.
   Node* value_map_bitfield =
       __ LoadField(AccessBuilder::ForMapBitField(), value_map);
-  __ GotoIfNot(
+  __ GotoUnless(
       __ Word32Equal(__ Word32And(value_map_bitfield,
                                   __ Int32Constant(1 << Map::kIsUndetectable)),
                      zero),
@@ -1105,11 +1102,11 @@ Node* EffectControlLinearizer::LowerTruncateTaggedPointerToBit(Node* node) {
 Node* EffectControlLinearizer::LowerChangeTaggedToInt32(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   __ Goto(&done, ChangeSmiToInt32(value));
 
   __ Bind(&if_not_smi);
@@ -1125,11 +1122,11 @@ Node* EffectControlLinearizer::LowerChangeTaggedToInt32(Node* node) {
 Node* EffectControlLinearizer::LowerChangeTaggedToUint32(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   __ Goto(&done, ChangeSmiToInt32(value));
 
   __ Bind(&if_not_smi);
@@ -1149,11 +1146,11 @@ Node* EffectControlLinearizer::LowerChangeTaggedToFloat64(Node* node) {
 Node* EffectControlLinearizer::LowerChangeTaggedToTaggedSigned(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   __ Goto(&done, value);
 
   __ Bind(&if_not_smi);
@@ -1170,11 +1167,11 @@ Node* EffectControlLinearizer::LowerChangeTaggedToTaggedSigned(Node* node) {
 Node* EffectControlLinearizer::LowerTruncateTaggedToFloat64(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kFloat64);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   Node* vtrue = ChangeSmiToInt32(value);
   vtrue = __ ChangeInt32ToFloat64(vtrue);
   __ Goto(&done, vtrue);
@@ -1193,7 +1190,7 @@ Node* EffectControlLinearizer::LowerCheckBounds(Node* node, Node* frame_state) {
   Node* limit = node->InputAt(1);
 
   Node* check = __ Uint32LessThan(index, limit);
-  __ DeoptimizeIfNot(DeoptimizeReason::kOutOfBounds, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kOutOfBounds, check, frame_state);
   return index;
 }
 
@@ -1205,8 +1202,9 @@ Node* EffectControlLinearizer::LowerCheckMaps(Node* node, Node* frame_state) {
   size_t const map_count = maps.size();
 
   if (p.flags() & CheckMapsFlag::kTryMigrateInstance) {
-    auto done = __ MakeDeferredLabel();
-    auto migrate = __ MakeDeferredLabel();
+    auto done =
+        __ MakeLabelFor(GraphAssemblerLabelType::kNonDeferred, map_count * 2);
+    auto migrate = __ MakeDeferredLabel<1>();
 
     // Load the current map of the {value}.
     Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
@@ -1216,7 +1214,7 @@ Node* EffectControlLinearizer::LowerCheckMaps(Node* node, Node* frame_state) {
       Node* map = __ HeapConstant(maps[i]);
       Node* check = __ WordEqual(value_map, map);
       if (i == map_count - 1) {
-        __ GotoIfNot(check, &migrate);
+        __ GotoUnless(check, &migrate);
         __ Goto(&done);
       } else {
         __ GotoIf(check, &done);
@@ -1256,7 +1254,7 @@ Node* EffectControlLinearizer::LowerCheckMaps(Node* node, Node* frame_state) {
       Node* map = __ HeapConstant(maps[i]);
       Node* check = __ WordEqual(value_map, map);
       if (i == map_count - 1) {
-        __ DeoptimizeIfNot(DeoptimizeReason::kWrongMap, check, frame_state);
+        __ DeoptimizeUnless(DeoptimizeReason::kWrongMap, check, frame_state);
       } else {
         __ GotoIf(check, &done);
       }
@@ -1265,7 +1263,8 @@ Node* EffectControlLinearizer::LowerCheckMaps(Node* node, Node* frame_state) {
     __ Goto(&done);
     __ Bind(&done);
   } else {
-    auto done = __ MakeLabel();
+    auto done =
+        __ MakeLabelFor(GraphAssemblerLabelType::kNonDeferred, map_count);
 
     // Load the current map of the {value}.
     Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
@@ -1274,7 +1273,7 @@ Node* EffectControlLinearizer::LowerCheckMaps(Node* node, Node* frame_state) {
       Node* map = __ HeapConstant(maps[i]);
       Node* check = __ WordEqual(value_map, map);
       if (i == map_count - 1) {
-        __ DeoptimizeIfNot(DeoptimizeReason::kWrongMap, check, frame_state);
+        __ DeoptimizeUnless(DeoptimizeReason::kWrongMap, check, frame_state);
       } else {
         __ GotoIf(check, &done);
       }
@@ -1285,54 +1284,20 @@ Node* EffectControlLinearizer::LowerCheckMaps(Node* node, Node* frame_state) {
   return value;
 }
 
-Node* EffectControlLinearizer::LowerCompareMaps(Node* node) {
-  ZoneHandleSet<Map> const& maps = CompareMapsParametersOf(node->op());
-  size_t const map_count = maps.size();
-  Node* value = node->InputAt(0);
-
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
-
-  // Load the current map of the {value}.
-  Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
-
-  for (size_t i = 0; i < map_count; ++i) {
-    Node* map = __ HeapConstant(maps[i]);
-    Node* check = __ WordEqual(value_map, map);
-    __ GotoIf(check, &done, __ Int32Constant(1));
-  }
-  __ Goto(&done, __ Int32Constant(0));
-
-  __ Bind(&done);
-  return done.PhiAt(0);
-}
-
-void EffectControlLinearizer::LowerCheckMapValue(Node* node,
-                                                 Node* frame_state) {
-  Node* value = node->InputAt(0);
-  Node* map = node->InputAt(1);
-
-  // Load the current map of the {value}.
-  Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
-
-  // Check if the {value}s map matches the expected {map}.
-  Node* check = __ WordEqual(value_map, map);
-  __ DeoptimizeIfNot(DeoptimizeReason::kWrongMap, check, frame_state);
-}
-
 Node* EffectControlLinearizer::LowerCheckNumber(Node* node, Node* frame_state) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel();
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>();
 
   Node* check0 = ObjectIsSmi(value);
-  __ GotoIfNot(check0, &if_not_smi);
+  __ GotoUnless(check0, &if_not_smi);
   __ Goto(&done);
 
   __ Bind(&if_not_smi);
   Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
   Node* check1 = __ WordEqual(value_map, __ HeapNumberMapConstant());
-  __ DeoptimizeIfNot(DeoptimizeReason::kNotAHeapNumber, check1, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kNotAHeapNumber, check1, frame_state);
   __ Goto(&done);
 
   __ Bind(&done);
@@ -1350,8 +1315,8 @@ Node* EffectControlLinearizer::LowerCheckReceiver(Node* node,
   STATIC_ASSERT(LAST_TYPE == LAST_JS_RECEIVER_TYPE);
   Node* check = __ Uint32LessThanOrEqual(
       __ Uint32Constant(FIRST_JS_RECEIVER_TYPE), value_instance_type);
-  __ DeoptimizeIfNot(DeoptimizeReason::kNotAJavaScriptObject, check,
-                     frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kNotAJavaScriptObject, check,
+                      frame_state);
   return value;
 }
 
@@ -1362,7 +1327,7 @@ Node* EffectControlLinearizer::LowerCheckSymbol(Node* node, Node* frame_state) {
 
   Node* check =
       __ WordEqual(value_map, __ HeapConstant(factory()->symbol_map()));
-  __ DeoptimizeIfNot(DeoptimizeReason::kNotASymbol, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kNotASymbol, check, frame_state);
   return value;
 }
 
@@ -1375,7 +1340,7 @@ Node* EffectControlLinearizer::LowerCheckString(Node* node, Node* frame_state) {
 
   Node* check = __ Uint32LessThan(value_instance_type,
                                   __ Uint32Constant(FIRST_NONSTRING_TYPE));
-  __ DeoptimizeIfNot(DeoptimizeReason::kWrongInstanceType, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kWrongInstanceType, check, frame_state);
   return value;
 }
 
@@ -1395,8 +1360,28 @@ Node* EffectControlLinearizer::LowerCheckSeqString(Node* node,
                      __ Int32Constant(kSeqStringTag));
   Node* is_sequential_string = __ Word32And(is_string, is_sequential);
 
-  __ DeoptimizeIfNot(DeoptimizeReason::kWrongInstanceType, is_sequential_string,
-                     frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kWrongInstanceType,
+                      is_sequential_string, frame_state);
+  return value;
+}
+
+Node* EffectControlLinearizer::LowerCheckNonEmptyString(Node* node,
+                                                        Node* frame_state) {
+  Node* value = node->InputAt(0);
+
+  Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
+  Node* value_instance_type =
+      __ LoadField(AccessBuilder::ForMapInstanceType(), value_map);
+
+  Node* is_string = __ Uint32LessThan(value_instance_type,
+                                      __ Uint32Constant(FIRST_NONSTRING_TYPE));
+  Node* is_non_empty = __ Word32Equal(
+      __ WordEqual(value, __ EmptyStringConstant()), __ Int32Constant(0));
+
+  Node* is_non_empty_string = __ Word32And(is_string, is_non_empty);
+
+  __ DeoptimizeUnless(DeoptimizeReason::kWrongInstanceType, is_non_empty_string,
+                      frame_state);
   return value;
 }
 
@@ -1412,15 +1397,15 @@ Node* EffectControlLinearizer::LowerCheckInternalizedString(Node* node,
       __ Word32And(value_instance_type,
                    __ Int32Constant(kIsNotStringMask | kIsNotInternalizedMask)),
       __ Int32Constant(kInternalizedTag));
-  __ DeoptimizeIfNot(DeoptimizeReason::kWrongInstanceType, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kWrongInstanceType, check, frame_state);
 
   return value;
 }
 
 Node* EffectControlLinearizer::LowerCheckIf(Node* node, Node* frame_state) {
   Node* value = node->InputAt(0);
-  __ DeoptimizeIfNot(DeoptimizeKind::kEager, DeoptimizeReason::kNoReason, value,
-                     frame_state);
+  __ DeoptimizeUnless(DeoptimizeKind::kEager, DeoptimizeReason::kNoReason,
+                      value, frame_state);
   return value;
 }
 
@@ -1451,16 +1436,16 @@ Node* EffectControlLinearizer::LowerCheckedInt32Div(Node* node,
   Node* lhs = node->InputAt(0);
   Node* rhs = node->InputAt(1);
 
-  auto if_not_positive = __ MakeDeferredLabel();
-  auto if_is_minint = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
-  auto minint_check_done = __ MakeLabel();
+  auto if_not_positive = __ MakeDeferredLabel<1>();
+  auto if_is_minint = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
+  auto minint_check_done = __ MakeLabel<2>();
 
   Node* zero = __ Int32Constant(0);
 
   // Check if {rhs} is positive (and not zero).
   Node* check0 = __ Int32LessThan(zero, rhs);
-  __ GotoIfNot(check0, &if_not_positive);
+  __ GotoUnless(check0, &if_not_positive);
 
   // Fast case, no additional checking required.
   __ Goto(&done, __ Int32Div(lhs, rhs));
@@ -1500,7 +1485,7 @@ Node* EffectControlLinearizer::LowerCheckedInt32Div(Node* node,
 
   // Check if the remainder is non-zero.
   Node* check = __ Word32Equal(lhs, __ Int32Mul(rhs, value));
-  __ DeoptimizeIfNot(DeoptimizeReason::kLostPrecision, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kLostPrecision, check, frame_state);
 
   return value;
 }
@@ -1527,11 +1512,11 @@ Node* EffectControlLinearizer::LowerCheckedInt32Mod(Node* node,
   Node* lhs = node->InputAt(0);
   Node* rhs = node->InputAt(1);
 
-  auto if_rhs_not_positive = __ MakeDeferredLabel();
-  auto if_lhs_negative = __ MakeDeferredLabel();
-  auto if_power_of_two = __ MakeLabel();
-  auto rhs_checked = __ MakeLabel(MachineRepresentation::kWord32);
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_rhs_not_positive = __ MakeDeferredLabel<1>();
+  auto if_lhs_negative = __ MakeDeferredLabel<1>();
+  auto if_power_of_two = __ MakeLabel<1>();
+  auto rhs_checked = __ MakeLabel<2>(MachineRepresentation::kWord32);
+  auto done = __ MakeLabel<3>(MachineRepresentation::kWord32);
 
   Node* zero = __ Int32Constant(0);
 
@@ -1606,7 +1591,7 @@ Node* EffectControlLinearizer::LowerCheckedUint32Div(Node* node,
 
   // Check if the remainder is non-zero.
   check = __ Word32Equal(lhs, __ Int32Mul(rhs, value));
-  __ DeoptimizeIfNot(DeoptimizeReason::kLostPrecision, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kLostPrecision, check, frame_state);
   return value;
 }
 
@@ -1638,8 +1623,8 @@ Node* EffectControlLinearizer::LowerCheckedInt32Mul(Node* node,
   Node* value = __ Projection(0, projection);
 
   if (mode == CheckForMinusZeroMode::kCheckForMinusZero) {
-    auto if_zero = __ MakeDeferredLabel();
-    auto check_done = __ MakeLabel();
+    auto if_zero = __ MakeDeferredLabel<1>();
+    auto check_done = __ MakeLabel<2>();
     Node* zero = __ Int32Constant(0);
     Node* check_zero = __ Word32Equal(value, zero);
     __ GotoIf(check_zero, &if_zero);
@@ -1680,7 +1665,7 @@ Node* EffectControlLinearizer::LowerCheckedUint32ToTaggedSigned(
     Node* node, Node* frame_state) {
   Node* value = node->InputAt(0);
   Node* check = __ Uint32LessThanOrEqual(value, SmiMaxValueConstant());
-  __ DeoptimizeIfNot(DeoptimizeReason::kLostPrecision, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kLostPrecision, check, frame_state);
   return ChangeUint32ToSmi(value);
 }
 
@@ -1688,13 +1673,13 @@ Node* EffectControlLinearizer::BuildCheckedFloat64ToInt32(
     CheckForMinusZeroMode mode, Node* value, Node* frame_state) {
   Node* value32 = __ RoundFloat64ToInt32(value);
   Node* check_same = __ Float64Equal(value, __ ChangeInt32ToFloat64(value32));
-  __ DeoptimizeIfNot(DeoptimizeReason::kLostPrecisionOrNaN, check_same,
-                     frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kLostPrecisionOrNaN, check_same,
+                      frame_state);
 
   if (mode == CheckForMinusZeroMode::kCheckForMinusZero) {
     // Check if {value} is -0.
-    auto if_zero = __ MakeDeferredLabel();
-    auto check_done = __ MakeLabel();
+    auto if_zero = __ MakeDeferredLabel<1>();
+    auto check_done = __ MakeLabel<2>();
 
     Node* check_zero = __ Word32Equal(value32, __ Int32Constant(0));
     __ GotoIf(check_zero, &if_zero);
@@ -1723,7 +1708,7 @@ Node* EffectControlLinearizer::LowerCheckedTaggedSignedToInt32(
     Node* node, Node* frame_state) {
   Node* value = node->InputAt(0);
   Node* check = ObjectIsSmi(value);
-  __ DeoptimizeIfNot(DeoptimizeReason::kNotASmi, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kNotASmi, check, frame_state);
   return ChangeSmiToInt32(value);
 }
 
@@ -1732,11 +1717,11 @@ Node* EffectControlLinearizer::LowerCheckedTaggedToInt32(Node* node,
   CheckForMinusZeroMode mode = CheckMinusZeroModeOf(node->op());
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   // In the Smi case, just convert to int32.
   __ Goto(&done, ChangeSmiToInt32(value));
 
@@ -1745,7 +1730,8 @@ Node* EffectControlLinearizer::LowerCheckedTaggedToInt32(Node* node,
   __ Bind(&if_not_smi);
   Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
   Node* check_map = __ WordEqual(value_map, __ HeapNumberMapConstant());
-  __ DeoptimizeIfNot(DeoptimizeReason::kNotAHeapNumber, check_map, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kNotAHeapNumber, check_map,
+                      frame_state);
   Node* vfalse = __ LoadField(AccessBuilder::ForHeapNumberValue(), value);
   vfalse = BuildCheckedFloat64ToInt32(mode, vfalse, frame_state);
   __ Goto(&done, vfalse);
@@ -1760,12 +1746,12 @@ Node* EffectControlLinearizer::BuildCheckedHeapNumberOrOddballToFloat64(
   Node* check_number = __ WordEqual(value_map, __ HeapNumberMapConstant());
   switch (mode) {
     case CheckTaggedInputMode::kNumber: {
-      __ DeoptimizeIfNot(DeoptimizeReason::kNotAHeapNumber, check_number,
-                         frame_state);
+      __ DeoptimizeUnless(DeoptimizeReason::kNotAHeapNumber, check_number,
+                          frame_state);
       break;
     }
     case CheckTaggedInputMode::kNumberOrOddball: {
-      auto check_done = __ MakeLabel();
+      auto check_done = __ MakeLabel<2>();
 
       __ GotoIf(check_number, &check_done);
       // For oddballs also contain the numeric value, let us just check that
@@ -1774,8 +1760,8 @@ Node* EffectControlLinearizer::BuildCheckedHeapNumberOrOddballToFloat64(
           __ LoadField(AccessBuilder::ForMapInstanceType(), value_map);
       Node* check_oddball =
           __ Word32Equal(instance_type, __ Int32Constant(ODDBALL_TYPE));
-      __ DeoptimizeIfNot(DeoptimizeReason::kNotANumberOrOddball, check_oddball,
-                         frame_state);
+      __ DeoptimizeUnless(DeoptimizeReason::kNotANumberOrOddball, check_oddball,
+                          frame_state);
       STATIC_ASSERT(HeapNumber::kValueOffset == Oddball::kToNumberRawOffset);
       __ Goto(&check_done);
 
@@ -1791,8 +1777,8 @@ Node* EffectControlLinearizer::LowerCheckedTaggedToFloat64(Node* node,
   CheckTaggedInputMode mode = CheckTaggedInputModeOf(node->op());
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_smi = __ MakeLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kFloat64);
 
   Node* check = ObjectIsSmi(value);
   __ GotoIf(check, &if_smi);
@@ -1817,7 +1803,7 @@ Node* EffectControlLinearizer::LowerCheckedTaggedToTaggedSigned(
   Node* value = node->InputAt(0);
 
   Node* check = ObjectIsSmi(value);
-  __ DeoptimizeIfNot(DeoptimizeReason::kNotASmi, check, frame_state);
+  __ DeoptimizeUnless(DeoptimizeReason::kNotASmi, check, frame_state);
 
   return value;
 }
@@ -1834,11 +1820,11 @@ Node* EffectControlLinearizer::LowerCheckedTaggedToTaggedPointer(
 Node* EffectControlLinearizer::LowerTruncateTaggedToWord32(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   __ Goto(&done, ChangeSmiToInt32(value));
 
   __ Bind(&if_not_smi);
@@ -1856,11 +1842,11 @@ Node* EffectControlLinearizer::LowerCheckedTruncateTaggedToWord32(
   CheckTaggedInputMode mode = CheckTaggedInputModeOf(node->op());
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* check = ObjectIsSmi(value);
-  __ GotoIfNot(check, &if_not_smi);
+  __ GotoUnless(check, &if_not_smi);
   // In the Smi case, just convert to int32.
   __ Goto(&done, ChangeSmiToInt32(value));
 
@@ -1876,35 +1862,11 @@ Node* EffectControlLinearizer::LowerCheckedTruncateTaggedToWord32(
   return done.PhiAt(0);
 }
 
-Node* EffectControlLinearizer::LowerObjectIsCallable(Node* node) {
-  Node* value = node->InputAt(0);
-
-  auto if_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
-
-  Node* check = ObjectIsSmi(value);
-  __ GotoIf(check, &if_smi);
-
-  Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
-  Node* value_bit_field =
-      __ LoadField(AccessBuilder::ForMapBitField(), value_map);
-  Node* vfalse = __ Word32Equal(
-      __ Int32Constant(1 << Map::kIsCallable),
-      __ Word32And(value_bit_field, __ Int32Constant(1 << Map::kIsCallable)));
-  __ Goto(&done, vfalse);
-
-  __ Bind(&if_smi);
-  __ Goto(&done, __ Int32Constant(0));
-
-  __ Bind(&done);
-  return done.PhiAt(0);
-}
-
 Node* EffectControlLinearizer::LowerObjectIsDetectableCallable(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   Node* check = ObjectIsSmi(value);
   __ GotoIf(check, &if_smi);
@@ -1930,15 +1892,15 @@ Node* EffectControlLinearizer::LowerObjectIsNaN(Node* node) {
   Node* value = node->InputAt(0);
   Node* zero = __ Int32Constant(0);
 
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto done = __ MakeLabel<3>(MachineRepresentation::kBit);
 
   // Check if {value} is a Smi.
   __ GotoIf(ObjectIsSmi(value), &done, zero);
 
   // Check if {value} is a HeapNumber.
   Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
-  __ GotoIfNot(__ WordEqual(value_map, __ HeapNumberMapConstant()), &done,
-               zero);
+  __ GotoUnless(__ WordEqual(value_map, __ HeapNumberMapConstant()), &done,
+                zero);
 
   // Check if {value} contains a NaN.
   Node* value_value = __ LoadField(AccessBuilder::ForHeapNumberValue(), value);
@@ -1952,8 +1914,8 @@ Node* EffectControlLinearizer::LowerObjectIsNaN(Node* node) {
 Node* EffectControlLinearizer::LowerObjectIsNonCallable(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_primitive = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_primitive = __ MakeDeferredLabel<2>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   Node* check0 = ObjectIsSmi(value);
   __ GotoIf(check0, &if_primitive);
@@ -1964,7 +1926,7 @@ Node* EffectControlLinearizer::LowerObjectIsNonCallable(Node* node) {
   STATIC_ASSERT(LAST_TYPE == LAST_JS_RECEIVER_TYPE);
   Node* check1 = __ Uint32LessThanOrEqual(
       __ Uint32Constant(FIRST_JS_RECEIVER_TYPE), value_instance_type);
-  __ GotoIfNot(check1, &if_primitive);
+  __ GotoUnless(check1, &if_primitive);
 
   Node* value_bit_field =
       __ LoadField(AccessBuilder::ForMapBitField(), value_map);
@@ -1983,8 +1945,8 @@ Node* EffectControlLinearizer::LowerObjectIsNonCallable(Node* node) {
 Node* EffectControlLinearizer::LowerObjectIsNumber(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   __ GotoIf(ObjectIsSmi(value), &if_smi);
   Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
@@ -2000,8 +1962,8 @@ Node* EffectControlLinearizer::LowerObjectIsNumber(Node* node) {
 Node* EffectControlLinearizer::LowerObjectIsReceiver(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   __ GotoIf(ObjectIsSmi(value), &if_smi);
 
@@ -2028,8 +1990,8 @@ Node* EffectControlLinearizer::LowerObjectIsSmi(Node* node) {
 Node* EffectControlLinearizer::LowerObjectIsString(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   Node* check = ObjectIsSmi(value);
   __ GotoIf(check, &if_smi);
@@ -2050,8 +2012,8 @@ Node* EffectControlLinearizer::LowerObjectIsString(Node* node) {
 Node* EffectControlLinearizer::LowerObjectIsSymbol(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   Node* check = ObjectIsSmi(value);
   __ GotoIf(check, &if_smi);
@@ -2072,8 +2034,8 @@ Node* EffectControlLinearizer::LowerObjectIsSymbol(Node* node) {
 Node* EffectControlLinearizer::LowerObjectIsUndetectable(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_smi = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kBit);
+  auto if_smi = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kBit);
 
   Node* check = ObjectIsSmi(value);
   __ GotoIf(check, &if_smi);
@@ -2106,8 +2068,8 @@ Node* EffectControlLinearizer::LowerArgumentsLength(Node* node) {
     // which is max(0, actual_parameter_count - formal_parameter_count).
     // We have to distinguish the case, when there is an arguments adaptor frame
     // (i.e., arguments_frame != LoadFramePointer()).
-    auto if_adaptor_frame = __ MakeLabel();
-    auto done = __ MakeLabel(MachineRepresentation::kTaggedSigned);
+    auto if_adaptor_frame = __ MakeLabel<1>();
+    auto done = __ MakeLabel<3>(MachineRepresentation::kTaggedSigned);
 
     Node* frame = __ LoadFramePointer();
     __ GotoIf(__ WordEqual(arguments_frame, frame), &done, __ SmiConstant(0));
@@ -2130,8 +2092,8 @@ Node* EffectControlLinearizer::LowerArgumentsLength(Node* node) {
     // The ArgumentsLength node is computing the actual number of arguments.
     // We have to distinguish the case when there is an arguments adaptor frame
     // (i.e., arguments_frame != LoadFramePointer()).
-    auto if_adaptor_frame = __ MakeLabel();
-    auto done = __ MakeLabel(MachineRepresentation::kTaggedSigned);
+    auto if_adaptor_frame = __ MakeLabel<1>();
+    auto done = __ MakeLabel<2>(MachineRepresentation::kTaggedSigned);
 
     Node* frame = __ LoadFramePointer();
     __ GotoIf(__ WordEqual(arguments_frame, frame), &done,
@@ -2150,7 +2112,7 @@ Node* EffectControlLinearizer::LowerArgumentsLength(Node* node) {
 }
 
 Node* EffectControlLinearizer::LowerArgumentsFrame(Node* node) {
-  auto done = __ MakeLabel(MachineType::PointerRepresentation());
+  auto done = __ MakeLabel<2>(MachineType::PointerRepresentation());
 
   Node* frame = __ LoadFramePointer();
   Node* parent_frame =
@@ -2229,8 +2191,8 @@ Node* EffectControlLinearizer::LowerSeqStringCharCodeAt(Node* node) {
   Node* receiver = node->InputAt(0);
   Node* position = node->InputAt(1);
 
-  auto one_byte_load = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto one_byte_load = __ MakeLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kWord32);
 
   Node* map = __ LoadField(AccessBuilder::ForMap(), receiver);
   Node* instance_type = __ LoadField(AccessBuilder::ForMapInstanceType(), map);
@@ -2255,9 +2217,9 @@ Node* EffectControlLinearizer::LowerSeqStringCharCodeAt(Node* node) {
 Node* EffectControlLinearizer::LowerStringFromCharCode(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto runtime_call = __ MakeDeferredLabel();
-  auto if_undefined = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto runtime_call = __ MakeDeferredLabel<2>();
+  auto if_undefined = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
 
   // Compute the character code.
   Node* code = __ Word32And(value, __ Int32Constant(String::kMaxUtf16CodeUnit));
@@ -2265,7 +2227,7 @@ Node* EffectControlLinearizer::LowerStringFromCharCode(Node* node) {
   // Check if the {code} is a one-byte char code.
   Node* check0 = __ Int32LessThanOrEqual(
       code, __ Int32Constant(String::kMaxOneByteCharCode));
-  __ GotoIfNot(check0, &runtime_call);
+  __ GotoUnless(check0, &runtime_call);
 
   // Load the isolate wide single character string cache.
   Node* cache = __ HeapConstant(factory()->single_character_string_cache());
@@ -2345,20 +2307,20 @@ Node* EffectControlLinearizer::LowerStringFromCodePoint(Node* node) {
   Node* value = node->InputAt(0);
   Node* code = value;
 
-  auto if_not_single_code = __ MakeDeferredLabel();
-  auto if_not_one_byte = __ MakeDeferredLabel();
-  auto cache_miss = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto if_not_single_code = __ MakeDeferredLabel<1>();
+  auto if_not_one_byte = __ MakeDeferredLabel<1>();
+  auto cache_miss = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<4>(MachineRepresentation::kTagged);
 
   // Check if the {code} is a single code unit
   Node* check0 = __ Uint32LessThanOrEqual(code, __ Uint32Constant(0xFFFF));
-  __ GotoIfNot(check0, &if_not_single_code);
+  __ GotoUnless(check0, &if_not_single_code);
 
   {
     // Check if the {code} is a one byte character
     Node* check1 = __ Uint32LessThanOrEqual(
         code, __ Uint32Constant(String::kMaxOneByteCharCode));
-    __ GotoIfNot(check1, &if_not_one_byte);
+    __ GotoUnless(check1, &if_not_one_byte);
     {
       // Load the isolate wide single character string cache.
       Node* cache = __ HeapConstant(factory()->single_character_string_cache());
@@ -2533,8 +2495,8 @@ Node* EffectControlLinearizer::LowerCheckNotTaggedHole(Node* node,
 Node* EffectControlLinearizer::LowerConvertTaggedHoleToUndefined(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_is_hole = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto if_is_hole = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
 
   Node* check = __ WordEqual(value, __ TheHoleConstant());
   __ GotoIf(check, &if_is_hole);
@@ -2597,12 +2559,12 @@ Node* EffectControlLinearizer::LowerPlainPrimitiveToNumber(Node* node) {
 Node* EffectControlLinearizer::LowerPlainPrimitiveToWord32(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto if_to_number_smi = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kWord32);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto if_to_number_smi = __ MakeLabel<1>();
+  auto done = __ MakeLabel<3>(MachineRepresentation::kWord32);
 
   Node* check0 = ObjectIsSmi(value);
-  __ GotoIfNot(check0, &if_not_smi);
+  __ GotoUnless(check0, &if_not_smi);
   __ Goto(&done, ChangeSmiToInt32(value));
 
   __ Bind(&if_not_smi);
@@ -2623,12 +2585,12 @@ Node* EffectControlLinearizer::LowerPlainPrimitiveToWord32(Node* node) {
 Node* EffectControlLinearizer::LowerPlainPrimitiveToFloat64(Node* node) {
   Node* value = node->InputAt(0);
 
-  auto if_not_smi = __ MakeDeferredLabel();
-  auto if_to_number_smi = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_not_smi = __ MakeDeferredLabel<1>();
+  auto if_to_number_smi = __ MakeLabel<1>();
+  auto done = __ MakeLabel<3>(MachineRepresentation::kFloat64);
 
   Node* check0 = ObjectIsSmi(value);
-  __ GotoIfNot(check0, &if_not_smi);
+  __ GotoUnless(check0, &if_not_smi);
   Node* from_smi = ChangeSmiToInt32(value);
   __ Goto(&done, __ ChangeInt32ToFloat64(from_smi));
 
@@ -2653,15 +2615,15 @@ Node* EffectControlLinearizer::LowerEnsureWritableFastElements(Node* node) {
   Node* object = node->InputAt(0);
   Node* elements = node->InputAt(1);
 
-  auto if_not_fixed_array = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
+  auto if_not_fixed_array = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
 
   // Load the current map of {elements}.
   Node* elements_map = __ LoadField(AccessBuilder::ForMap(), elements);
 
   // Check if {elements} is not a copy-on-write FixedArray.
   Node* check = __ WordEqual(elements_map, __ FixedArrayMapConstant());
-  __ GotoIfNot(check, &if_not_fixed_array);
+  __ GotoUnless(check, &if_not_fixed_array);
   // Nothing to do if the {elements} are not copy-on-write.
   __ Goto(&done, elements);
 
@@ -2689,15 +2651,15 @@ Node* EffectControlLinearizer::LowerMaybeGrowFastElements(Node* node,
   Node* index = node->InputAt(2);
   Node* length = node->InputAt(3);
 
-  auto done = __ MakeLabel(MachineRepresentation::kTagged);
-  auto done_grow = __ MakeLabel(MachineRepresentation::kTagged);
-  auto if_grow = __ MakeDeferredLabel();
-  auto if_not_grow = __ MakeLabel();
+  auto done = __ MakeLabel<2>(MachineRepresentation::kTagged);
+  auto done_grow = __ MakeLabel<2>(MachineRepresentation::kTagged);
+  auto if_grow = __ MakeDeferredLabel<1>();
+  auto if_not_grow = __ MakeLabel<1>();
 
   Node* check0 = (flags & GrowFastElementsFlag::kHoleyElements)
                      ? __ Uint32LessThanOrEqual(length, index)
                      : __ Word32Equal(length, index);
-  __ GotoIfNot(check0, &if_not_grow);
+  __ GotoUnless(check0, &if_not_grow);
   {
     // Load the length of the {elements} backing store.
     Node* elements_length =
@@ -2706,7 +2668,7 @@ Node* EffectControlLinearizer::LowerMaybeGrowFastElements(Node* node,
 
     // Check if we need to grow the {elements} backing store.
     Node* check1 = __ Uint32LessThan(index, elements_length);
-    __ GotoIfNot(check1, &if_grow);
+    __ GotoUnless(check1, &if_grow);
     __ Goto(&done_grow, elements);
 
     __ Bind(&if_grow);
@@ -2754,7 +2716,7 @@ Node* EffectControlLinearizer::LowerMaybeGrowFastElements(Node* node,
     // guards the index (and the operator forces {index} to be unsigned).
     if (!(flags & GrowFastElementsFlag::kHoleyElements)) {
       Node* check1 = __ Uint32LessThan(index, length);
-      __ DeoptimizeIfNot(DeoptimizeReason::kOutOfBounds, check1, frame_state);
+      __ DeoptimizeUnless(DeoptimizeReason::kOutOfBounds, check1, frame_state);
     }
     __ Goto(&done, elements);
   }
@@ -2766,8 +2728,8 @@ void EffectControlLinearizer::LowerTransitionElementsKind(Node* node) {
   ElementsTransition const transition = ElementsTransitionOf(node->op());
   Node* object = node->InputAt(0);
 
-  auto if_map_same = __ MakeDeferredLabel();
-  auto done = __ MakeLabel();
+  auto if_map_same = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<2>();
 
   Node* source_map = __ HeapConstant(transition.source());
   Node* target_map = __ HeapConstant(transition.target());
@@ -2930,13 +2892,13 @@ void EffectControlLinearizer::LowerTransitionAndStoreElement(Node* node) {
     kind = __ Word32Shr(andit, shift);
   }
 
-  auto do_store = __ MakeLabel(MachineRepresentation::kWord32);
+  auto do_store = __ MakeLabel<6>(MachineRepresentation::kWord32);
   Node* check1 = ObjectIsSmi(value);
   __ GotoIf(check1, &do_store, kind);
   {
     // {value} is a HeapObject.
     Node* check2 = IsElementsKindGreaterThan(kind, HOLEY_SMI_ELEMENTS);
-    auto if_array_not_fast_smi = __ MakeLabel();
+    auto if_array_not_fast_smi = __ MakeLabel<1>();
     __ GotoIf(check2, &if_array_not_fast_smi);
     {
       // Transition {array} from HOLEY_SMI_ELEMENTS to HOLEY_DOUBLE_ELEMENTS or
@@ -2944,8 +2906,8 @@ void EffectControlLinearizer::LowerTransitionAndStoreElement(Node* node) {
       Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
       Node* heap_number_map = __ HeapNumberMapConstant();
       Node* check3 = __ WordEqual(value_map, heap_number_map);
-      auto if_value_not_heap_number = __ MakeLabel();
-      __ GotoIfNot(check3, &if_value_not_heap_number);
+      auto if_value_not_heap_number = __ MakeLabel<1>();
+      __ GotoUnless(check3, &if_value_not_heap_number);
       {
         // {value} is a HeapNumber.
         TransitionElementsTo(node, array, HOLEY_SMI_ELEMENTS,
@@ -2961,7 +2923,7 @@ void EffectControlLinearizer::LowerTransitionAndStoreElement(Node* node) {
     __ Bind(&if_array_not_fast_smi);
     {
       Node* check3 = IsElementsKindGreaterThan(kind, HOLEY_ELEMENTS);
-      __ GotoIfNot(check3, &do_store, kind);
+      __ GotoUnless(check3, &do_store, kind);
       // We have double elements kind.
       Node* value_map = __ LoadField(AccessBuilder::ForMap(), value);
       Node* heap_number_map = __ HeapNumberMapConstant();
@@ -2979,8 +2941,8 @@ void EffectControlLinearizer::LowerTransitionAndStoreElement(Node* node) {
 
   Node* elements = __ LoadField(AccessBuilder::ForJSObjectElements(), array);
   Node* check2 = IsElementsKindGreaterThan(kind, HOLEY_ELEMENTS);
-  auto if_kind_is_double = __ MakeLabel();
-  auto done = __ MakeLabel();
+  auto if_kind_is_double = __ MakeLabel<1>();
+  auto done = __ MakeLabel<3>();
   __ GotoIf(check2, &if_kind_is_double);
   {
     // Our ElementsKind is HOLEY_SMI_ELEMENTS or HOLEY_ELEMENTS.
@@ -2992,8 +2954,8 @@ void EffectControlLinearizer::LowerTransitionAndStoreElement(Node* node) {
   {
     // Our ElementsKind is HOLEY_DOUBLE_ELEMENTS.
     Node* check1 = ObjectIsSmi(value);
-    auto do_double_store = __ MakeLabel();
-    __ GotoIfNot(check1, &do_double_store);
+    auto do_double_store = __ MakeLabel<1>();
+    __ GotoUnless(check1, &do_double_store);
     {
       Node* int_value = ChangeSmiToInt32(value);
       Node* float_value = __ ChangeInt32ToFloat64(int_value);
@@ -3044,25 +3006,25 @@ Maybe<Node*> EffectControlLinearizer::LowerFloat64RoundUp(Node* node) {
   //         let temp3 = (if temp1 < temp2 then temp2 - 1 else temp2) in
   //         -0 - temp3
 
-  auto if_not_positive = __ MakeDeferredLabel();
-  auto if_greater_than_two_52 = __ MakeDeferredLabel();
-  auto if_less_than_minus_two_52 = __ MakeDeferredLabel();
-  auto if_zero = __ MakeDeferredLabel();
-  auto done_temp3 = __ MakeLabel(MachineRepresentation::kFloat64);
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_not_positive = __ MakeDeferredLabel<1>();
+  auto if_greater_than_two_52 = __ MakeDeferredLabel<1>();
+  auto if_less_than_minus_two_52 = __ MakeDeferredLabel<1>();
+  auto if_zero = __ MakeDeferredLabel<1>();
+  auto done_temp3 = __ MakeLabel<2>(MachineRepresentation::kFloat64);
+  auto done = __ MakeLabel<6>(MachineRepresentation::kFloat64);
 
   Node* const zero = __ Float64Constant(0.0);
   Node* const two_52 = __ Float64Constant(4503599627370496.0E0);
   Node* const one = __ Float64Constant(1.0);
 
   Node* check0 = __ Float64LessThan(zero, input);
-  __ GotoIfNot(check0, &if_not_positive);
+  __ GotoUnless(check0, &if_not_positive);
   {
     Node* check1 = __ Float64LessThanOrEqual(two_52, input);
     __ GotoIf(check1, &if_greater_than_two_52);
     {
       Node* temp1 = __ Float64Sub(__ Float64Add(two_52, input), two_52);
-      __ GotoIfNot(__ Float64LessThan(temp1, input), &done, temp1);
+      __ GotoUnless(__ Float64LessThan(temp1, input), &done, temp1);
       __ Goto(&done, __ Float64Add(temp1, one));
     }
 
@@ -3084,7 +3046,7 @@ Maybe<Node*> EffectControlLinearizer::LowerFloat64RoundUp(Node* node) {
       Node* temp1 = __ Float64Sub(minus_zero, input);
       Node* temp2 = __ Float64Sub(__ Float64Add(two_52, temp1), two_52);
       Node* check3 = __ Float64LessThan(temp1, temp2);
-      __ GotoIfNot(check3, &done_temp3, temp2);
+      __ GotoUnless(check3, &done_temp3, temp2);
       __ Goto(&done_temp3, __ Float64Sub(temp2, one));
 
       __ Bind(&done_temp3);
@@ -3134,25 +3096,25 @@ Node* EffectControlLinearizer::BuildFloat64RoundDown(Node* value) {
   //         else
   //           -0 - temp2
 
-  auto if_not_positive = __ MakeDeferredLabel();
-  auto if_greater_than_two_52 = __ MakeDeferredLabel();
-  auto if_less_than_minus_two_52 = __ MakeDeferredLabel();
-  auto if_temp2_lt_temp1 = __ MakeLabel();
-  auto if_zero = __ MakeDeferredLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_not_positive = __ MakeDeferredLabel<1>();
+  auto if_greater_than_two_52 = __ MakeDeferredLabel<1>();
+  auto if_less_than_minus_two_52 = __ MakeDeferredLabel<1>();
+  auto if_temp2_lt_temp1 = __ MakeLabel<1>();
+  auto if_zero = __ MakeDeferredLabel<1>();
+  auto done = __ MakeLabel<7>(MachineRepresentation::kFloat64);
 
   Node* const zero = __ Float64Constant(0.0);
   Node* const two_52 = __ Float64Constant(4503599627370496.0E0);
 
   Node* check0 = __ Float64LessThan(zero, input);
-  __ GotoIfNot(check0, &if_not_positive);
+  __ GotoUnless(check0, &if_not_positive);
   {
     Node* check1 = __ Float64LessThanOrEqual(two_52, input);
     __ GotoIf(check1, &if_greater_than_two_52);
     {
       Node* const one = __ Float64Constant(1.0);
       Node* temp1 = __ Float64Sub(__ Float64Add(two_52, input), two_52);
-      __ GotoIfNot(__ Float64LessThan(input, temp1), &done, temp1);
+      __ GotoUnless(__ Float64LessThan(input, temp1), &done, temp1);
       __ Goto(&done, __ Float64Sub(temp1, one));
     }
 
@@ -3223,8 +3185,8 @@ Maybe<Node*> EffectControlLinearizer::LowerFloat64RoundTiesEven(Node* node) {
   //     else
   //       value + 1.0
 
-  auto if_is_half = __ MakeLabel();
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_is_half = __ MakeLabel<1>();
+  auto done = __ MakeLabel<4>(MachineRepresentation::kFloat64);
 
   Node* value = BuildFloat64RoundDown(input);
   Node* temp1 = __ Float64Sub(input, value);
@@ -3235,7 +3197,7 @@ Maybe<Node*> EffectControlLinearizer::LowerFloat64RoundTiesEven(Node* node) {
 
   Node* const one = __ Float64Constant(1.0);
   Node* check1 = __ Float64LessThan(half, temp1);
-  __ GotoIfNot(check1, &if_is_half);
+  __ GotoUnless(check1, &if_is_half);
   __ Goto(&done, __ Float64Add(value, one));
 
   __ Bind(&if_is_half);
@@ -3282,25 +3244,25 @@ Maybe<Node*> EffectControlLinearizer::LowerFloat64RoundTruncate(Node* node) {
   // Note: We do not use the Diamond helper class here, because it really hurts
   // readability with nested diamonds.
 
-  auto if_not_positive = __ MakeDeferredLabel();
-  auto if_greater_than_two_52 = __ MakeDeferredLabel();
-  auto if_less_than_minus_two_52 = __ MakeDeferredLabel();
-  auto if_zero = __ MakeDeferredLabel();
-  auto done_temp3 = __ MakeLabel(MachineRepresentation::kFloat64);
-  auto done = __ MakeLabel(MachineRepresentation::kFloat64);
+  auto if_not_positive = __ MakeDeferredLabel<1>();
+  auto if_greater_than_two_52 = __ MakeDeferredLabel<1>();
+  auto if_less_than_minus_two_52 = __ MakeDeferredLabel<1>();
+  auto if_zero = __ MakeDeferredLabel<1>();
+  auto done_temp3 = __ MakeLabel<2>(MachineRepresentation::kFloat64);
+  auto done = __ MakeLabel<6>(MachineRepresentation::kFloat64);
 
   Node* const zero = __ Float64Constant(0.0);
   Node* const two_52 = __ Float64Constant(4503599627370496.0E0);
   Node* const one = __ Float64Constant(1.0);
 
   Node* check0 = __ Float64LessThan(zero, input);
-  __ GotoIfNot(check0, &if_not_positive);
+  __ GotoUnless(check0, &if_not_positive);
   {
     Node* check1 = __ Float64LessThanOrEqual(two_52, input);
     __ GotoIf(check1, &if_greater_than_two_52);
     {
       Node* temp1 = __ Float64Sub(__ Float64Add(two_52, input), two_52);
-      __ GotoIfNot(__ Float64LessThan(input, temp1), &done, temp1);
+      __ GotoUnless(__ Float64LessThan(input, temp1), &done, temp1);
       __ Goto(&done, __ Float64Sub(temp1, one));
     }
 
@@ -3322,7 +3284,7 @@ Maybe<Node*> EffectControlLinearizer::LowerFloat64RoundTruncate(Node* node) {
       Node* temp1 = __ Float64Sub(minus_zero, input);
       Node* temp2 = __ Float64Sub(__ Float64Add(two_52, temp1), two_52);
       Node* check3 = __ Float64LessThan(temp1, temp2);
-      __ GotoIfNot(check3, &done_temp3, temp2);
+      __ GotoUnless(check3, &done_temp3, temp2);
       __ Goto(&done_temp3, __ Float64Sub(temp2, one));
 
       __ Bind(&done_temp3);

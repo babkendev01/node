@@ -184,10 +184,6 @@ class CoverageBlockIterator final {
     return GetNextBlock();
   }
 
-  // A range is considered to be at top level if its parent range is the
-  // function range.
-  bool IsTopLevel() const { return nesting_stack_.size() == 1; }
-
   void DeleteBlock() {
     DCHECK(!delete_current_);
     DCHECK(IsActive());
@@ -260,16 +256,8 @@ void RewritePositionSingletonsToRanges(CoverageFunction* function) {
     } else if (block.end == kNoSourcePosition) {
       // The current block ends at the next sibling block (if it exists) or the
       // end of the parent block otherwise.
-      if (iter.HasSiblingOrChild()) {
-        block.end = iter.GetSiblingOrChild().start;
-      } else if (iter.IsTopLevel()) {
-        // See https://crbug.com/v8/6661. Functions are special-cased because
-        // we never want the closing brace to be uncovered. This is mainly to
-        // avoid a noisy UI.
-        block.end = parent.end - 1;
-      } else {
-        block.end = parent.end;
-      }
+      block.end = iter.HasSiblingOrChild() ? iter.GetSiblingOrChild().start
+                                           : parent.end;
     }
   }
 }
@@ -354,9 +342,6 @@ void CollectBlockCoverage(Isolate* isolate, CoverageFunction* function,
   function->has_block_coverage = true;
   function->blocks = GetSortedBlockData(isolate, info);
 
-  // If in binary mode, only report counts of 0/1.
-  if (mode == debug::Coverage::kBlockBinary) ClampToBinary(function);
-
   // Remove duplicate singleton ranges, keeping the max count.
   MergeDuplicateSingletons(function);
 
@@ -374,6 +359,8 @@ void CollectBlockCoverage(Isolate* isolate, CoverageFunction* function,
   // Filter out ranges of zero length.
   FilterEmptyRanges(function);
 
+  // If in binary mode, only report counts of 0/1.
+  if (mode == debug::Coverage::kBlockBinary) ClampToBinary(function);
 
   // Reset all counters on the DebugInfo to zero.
   ResetAllBlockCounts(info);
@@ -487,24 +474,19 @@ Coverage* Coverage::Collect(Isolate* isolate,
             break;
         }
       }
-
-      Handle<String> name(info->DebugName(), isolate);
-      CoverageFunction function(start, end, count, name);
-
-      if (FLAG_block_coverage && IsBlockMode(collectionMode) &&
-          info->HasCoverageInfo()) {
-        CollectBlockCoverage(isolate, &function, info, collectionMode);
-      }
-
-      // Only include a function range if itself or its parent function is
-      // covered, or if it contains non-trivial block coverage.
-      bool is_covered = (count != 0);
-      bool parent_is_covered =
-          (!nesting.empty() && functions->at(nesting.back()).count != 0);
-      bool has_block_coverage = !function.blocks.empty();
-      if (is_covered || parent_is_covered || has_block_coverage) {
+      // Only include a function range if it has a non-0 count, or
+      // if it is directly nested inside a function with non-0 count.
+      if (count != 0 ||
+          (!nesting.empty() && functions->at(nesting.back()).count != 0)) {
+        Handle<String> name(info->DebugName(), isolate);
         nesting.push_back(functions->size());
-        functions->emplace_back(function);
+        functions->emplace_back(start, end, count, name);
+
+        if (FLAG_block_coverage && IsBlockMode(collectionMode) &&
+            info->HasCoverageInfo()) {
+          CoverageFunction* function = &functions->back();
+          CollectBlockCoverage(isolate, function, info, collectionMode);
+        }
       }
     }
 
@@ -544,7 +526,6 @@ void Coverage::SelectMode(Isolate* isolate, debug::Coverage::Mode mode) {
             FeedbackVector* vector = FeedbackVector::cast(current_obj);
             SharedFunctionInfo* shared = vector->shared_function_info();
             if (!shared->IsSubjectToDebugging()) continue;
-            vector->clear_invocation_count();
             vectors.emplace_back(vector, isolate);
           }
         }

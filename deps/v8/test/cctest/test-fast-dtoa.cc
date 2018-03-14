@@ -37,8 +37,7 @@
 #include "test/cctest/gay-precision.h"
 #include "test/cctest/gay-shortest.h"
 
-namespace v8 {
-namespace internal {
+using namespace v8::internal;
 
 static const int kBufferSize = 100;
 
@@ -292,6 +291,3 @@ TEST(FastDtoaGayPrecision) {
   // succeed.
   CHECK_GT(succeeded_15*1.0/total_15, 0.9999);
 }
-
-}  // namespace internal
-}  // namespace v8
